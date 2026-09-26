@@ -144,6 +144,7 @@ class MicMuteWatcher:
         self.state: Optional[bool] = None
         self._toggle = threading.Event()
         self._stop = threading.Event()
+        self._resync = False
         self._thread: Optional[threading.Thread] = None
 
     @property
@@ -161,6 +162,10 @@ class MicMuteWatcher:
     def toggle(self) -> None:
         self._toggle.set()
 
+    def resync(self) -> None:
+        """After sleep the audio endpoint may be new: look it up again."""
+        self._resync = True
+
     def _run(self) -> None:
         try:
             mic = self.factory()
@@ -173,7 +178,8 @@ class MicMuteWatcher:
                 self._toggle.wait(self.interval * 5)
                 continue
             try:
-                if time.monotonic() - last_resolve > 30:     # follow device changes
+                if self._resync or time.monotonic() - last_resolve > 30:     # follow device changes
+                    self._resync = False
                     mic.resolve()
                     last_resolve = time.monotonic()
                 if self._toggle.is_set():

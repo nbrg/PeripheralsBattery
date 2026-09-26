@@ -106,9 +106,9 @@ def cmd_probe() -> int:
 def run_tray() -> int:
     from . import winshell
     from .app import App
-    from .history import History
     from .micmute import MicMuteWatcher
     from .model import HEADSET
+    from .power import PowerWatcher
     from .sources import build_sources
     from .tray import PystrayBackend
 
@@ -125,8 +125,7 @@ def run_tray() -> int:
         store["first_run_done"] = True
         store.save()
     backend = PystrayBackend(winshell.tray_icon_size())
-    history = History(app_dir() / "history.csv" if store["history"] else None)
-    app = App(store, backend, history=history, light_taskbar=winshell.taskbar_is_light)
+    app = App(store, backend, light_taskbar=winshell.taskbar_is_light)
     backend.app = app
     app.sources = build_sources(store, on_change=app.update)
 
@@ -139,6 +138,13 @@ def run_tray() -> int:
         app.mic_toggle = mic.toggle
         mic.start()
 
+    def on_resume():
+        app.resumed()
+        mic.resync()
+
+    power = PowerWatcher(on_resume)
+    power.start()                        # no-op outside Windows; the poll loop also notices sleep
+
     wire_windows(app)
 
     for target, name in ((app.poll_loop, "poll"), (app.flash_loop, "flash")):
@@ -149,6 +155,7 @@ def run_tray() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        power.stop()
         app.stop()
         if getattr(app, "ui", None) is not None:
             app.ui.stop()

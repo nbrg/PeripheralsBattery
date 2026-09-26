@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence
 
 from . import style
 from .config import Store
-from .history import History
+from .estimate import Estimator
 from .model import DEVICE, HEADSET, Reading, merge
 from .render import render
 
@@ -21,6 +21,9 @@ PLACEHOLDER = "__none__"
 FLASH_PERIOD = 0.25          # seconds per on/off half-cycle while the mic is muted
 FAST_POLL = 3.0              # seconds between cheap status checks (mute, power)
 TOOLTIP_MAX = 127
+RESUME_SETTLE = 3.0          # after waking: give USB and the radios a moment...
+RESUME_RECHECK = 15.0        # ...and look again once wireless devices have reconnected
+SLEEP_GAP = 30.0             # a wait that overran by this much means the PC was asleep
 # Devices from these sources vanish (rather than turn grey) when the source is switched off.
 SOURCE_SWITCHES = {"bt-": "bluetooth", "xinput-": "xinput"}
 
@@ -58,13 +61,13 @@ def _clip(text: str) -> str:
 
 class App:
     def __init__(self, store: Store, backend: Backend, sources: Sequence = (),
-                 history: Optional[History] = None,
+                 estimator: Optional[Estimator] = None,
                  light_taskbar: Callable[[], bool] = lambda: False,
                  clock: Callable[[], float] = time.time):
         self.store = store
         self.backend = backend
         self.sources = list(sources)
-        self.history = history or History()
+        self.estimator = estimator or Estimator()
         self.theme_probe = light_taskbar
         self.light = light_taskbar()
         self.mic_toggle: Optional[Callable[[], None]] = None
@@ -83,6 +86,7 @@ class App:
         self.refresh_event = threading.Event()
         self.flash_event = threading.Event()
         self._menus_dirty = False
+        self._resumed_at: Optional[float] = None
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -145,7 +149,7 @@ class App:
             r = r.with_(level=prev.level)          # keep the last known level on a grey icon
         self.readings[r.key] = r
         if r.online:
-            self.history.record(r, self.clock())
+            self.estimator.record(r, self.clock())
             self.store.devices[r.key] = {"name": r.name, "kind": r.kind, "level": r.level}
         self._draw(r.key)                      # before alerts: a notification needs the icon
         if r.online:
@@ -187,7 +191,7 @@ class App:
         image = render(*cache_key[:4], online=eff.online, border_on=border_on,
                        show_number=self.store["show_number"], charging=eff.charging,
                        light_taskbar=light)
-        title = describe(eff, self.history.estimate(eff))
+        title = describe(eff, self.estimator.estimate(eff))
         if key not in self.shown:
             self.backend.show(key, image, title)
         elif self.shown[key] != cache_key:
@@ -298,18 +302,59 @@ class App:
         self.store.save()
         return results
 
+    def resumed(self) -> None:
+        """The PC woke up. Safe to call from any thread (the Windows power
+        callback, or the poll loop's own clock check)."""
+        log.info("resumed from sleep: re-checking devices")
+        self._resumed_at = time.monotonic()
+        self.refresh_event.set()
+
+    def _after_resume(self) -> Optional[float]:
+        """On the poll thread: let devices settle, drop handles that may have gone
+        stale while asleep, and return when to look again."""
+        at = self._resumed_at
+        if at is None:
+            return None
+        settle = at + RESUME_SETTLE - time.monotonic()
+        if settle > 0 and self.stop_event.wait(settle):
+            return None
+        self._resumed_at = None
+        for s in self.sources:
+            reset = getattr(s, "reset", None)
+            if reset:
+                try:
+                    reset()
+                except Exception as e:
+                    log.debug("%s reset: %s", getattr(s, "name", s), e)
+        return time.monotonic() + RESUME_RECHECK - RESUME_SETTLE
+
+    def _wait(self, timeout: float) -> bool:
+        """Waits for a refresh request; also notices a sleep in between, because
+        the wall clock then moves far more than the wait was meant to take."""
+        before = time.time()
+        woken = self.refresh_event.wait(timeout)
+        if not woken and time.time() - before > timeout + SLEEP_GAP and self._resumed_at is None:
+            self.resumed()
+            return True
+        return woken
+
     def poll_loop(self) -> None:
         fast = [f for f in (getattr(s, "poll_fast", None) for s in self.sources) if f]
         while not self.stop_event.is_set():
             self.refresh_event.clear()
+            recheck = self._after_resume()
+            if self.stop_event.is_set():
+                return
             self.poll_once()
             deadline = time.monotonic() + max(10, int(self.store["poll_seconds"]))
+            if recheck is not None:
+                deadline = min(deadline, recheck)
             while not self.stop_event.is_set():
                 left = deadline - time.monotonic()
                 if left <= 0:
                     break
                 # Without a status-pushing source there is nothing to do until the next poll.
-                if self.refresh_event.wait(min(FAST_POLL, left) if fast else left):
+                if self._wait(min(FAST_POLL, left) if fast else left):
                     break
                 for f in fast:
                     try:

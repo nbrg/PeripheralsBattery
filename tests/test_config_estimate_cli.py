@@ -2,7 +2,7 @@ import json
 
 from peribatt import __main__ as cli
 from peribatt.config import DEFAULTS, Store, app_dir
-from peribatt.history import History, format_duration, slope_per_hour
+from peribatt.estimate import Estimator, format_duration, slope_per_hour
 from peribatt.model import MOUSE, Reading
 
 # --- config ------------------------------------------------------------------
@@ -35,7 +35,7 @@ def test_app_dir_env_override(monkeypatch, tmp_path):
     assert app_dir() == tmp_path
 
 
-# --- history -----------------------------------------------------------------
+# --- estimates -----------------------------------------------------------------
 
 def test_slope_needs_enough_data():
     assert slope_per_hour([(0, 80)]) is None
@@ -52,8 +52,8 @@ def test_format_duration():
     assert format_duration(100) == "4d"
 
 
-def test_estimate_discharge_and_charge(tmp_path):
-    h = History(tmp_path / "history.csv")
+def test_estimate_discharge_and_charge():
+    h = Estimator()
     r = Reading("m", "Mouse", MOUSE, 80)
     for i, level in enumerate((80, 79, 78, 77)):
         h.record(r.with_(level=level), now=i * 1800.0)
@@ -64,14 +64,14 @@ def test_estimate_discharge_and_charge(tmp_path):
     for i, level in enumerate((80, 85, 90)):
         h.record(r.with_(level=level, charging=True), now=6000.0 + (i + 1) * 900)
     assert h.estimate(r.with_(level=90, charging=True)).startswith("full in ~")
-    rows = (tmp_path / "history.csv").read_text().splitlines()
-    assert rows[0] == "time,device,level,charging" and len(rows) == 8
 
 
-def test_history_ignores_offline():
-    h = History()
+def test_estimator_ignores_offline_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    h = Estimator()
     h.record(Reading("m", "Mouse", MOUSE, 50, online=False))
-    assert h.sessions == {}
+    h.record(Reading("m", "Mouse", MOUSE, 50))
+    assert list(h.sessions) == ["m"] and list(tmp_path.iterdir()) == []
 
 
 # --- CLI ---------------------------------------------------------------------

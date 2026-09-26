@@ -45,7 +45,6 @@ SECTIONS: Tuple[Tuple[str, Sequence[object]], ...] = (
                ((0, "Off"), (10, "10%"), (15, "15%"), (20, "20%"), (25, "25%"))),
         Toggle("notify_full", "Notify when a device is fully charged"),
         Toggle("autostart", "Start with Windows"),
-        Toggle("history", "Keep a battery history (history.csv)"),
     )),
     ("Icons", (
         Number("low", "Red frame below (%)", 1, 50),

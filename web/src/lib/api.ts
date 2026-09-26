@@ -26,7 +26,6 @@ export interface Settings {
   alert_at: number
   notify_full: boolean
   autostart: boolean
-  history: boolean
   low: number
   warn: number
   show_number: boolean

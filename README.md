@@ -31,6 +31,9 @@ All thresholds can be changed in `settings.json`.
 - **Notifications**: low battery (once per discharge) and "fully charged, unplug it".
 - **Starts with Windows** (switched on at first launch; untick it in the menu).
 - **Remembers your devices**: a mouse that is off at boot still gets its grey icon.
+- **Wakes up with your PC**: after sleep or hibernation it re-opens the receivers and
+  re-checks every device straight away (and again once wireless gear has reconnected),
+  instead of showing stale levels until the next poll.
 - **A modern settings window** built with React and Microsoft's
   [Fluent UI](https://react.fluentui.dev) (the Windows 11 design system): live device
   cards, instant-save settings, colour thresholds with a live icon preview, light/dark
@@ -39,7 +42,6 @@ All thresholds can be changed in `settings.json`.
 - **Learn a new device**: a wizard that listens to an unsupported USB dongle while
   you mute/unmute and plug/unplug it, finds the battery, mute and charging bytes,
   and saves them as a shareable recipe.
-- **Battery history** in `history.csv` for anyone who wants to chart it.
 - **Device recipes**: support for a new request/reply headset is a few lines of JSON, no code.
 - `--once` / `--json` for scripts and widgets, `--probe` for diagnostics.
 - **Light on resources**: one battery read a minute, event-driven everywhere else;
@@ -125,7 +127,7 @@ python -m peribatt --learn         the learn-a-device wizard on its own
 python -m peribatt --autostart on  start with Windows (or: off)
 ```
 
-Settings, `history.csv`, extra `recipes.json` and the log live in
+Settings, extra `recipes.json` and the log live in
 `%APPDATA%\PeripheralsBattery`.
 
 ## How it works
@@ -135,7 +137,7 @@ sources (one per protocol)                 app core                 front end
 ┌─────────────────────────┐   Readings   ┌───────────────┐  images  ┌──────────┐
 │ hidpp  (Logitech)       │──┐           │ merge, colour │ tooltips │ pystray  │
 │ hyperx (push + poll)    │──┤  poll /   │ rules, alerts,│─────────▶│ one icon │
-│ razer, recipes (JSON)   │──┼─ events ─▶│ history, mute │  menus   │ per      │
+│ razer, recipes (JSON)   │──┼─ events ─▶│ estimates,mute│  menus   │ per      │
 │ bluetooth, xinput, hsc  │──┘           │ blink         │          │ device   │
 └─────────────────────────┘              └───────────────┘          └──────────┘
 ```
@@ -145,6 +147,8 @@ sources (one per protocol)                 app core                 front end
 - `peribatt/render.py` — vector pictograms, drawn 4× and box-filtered down; results are cached.
 - `peribatt/hidpp.py`, `hyperx.py`, `razer.py`, `recipes.py`, `bluetooth.py`, `xinput.py`, `hsc.py` — the providers.
 - `peribatt/micmute.py` — Windows Core Audio via raw COM (ctypes, no pywin32).
+- `peribatt/power.py` — sleep/resume notifications (`PowerRegisterSuspendResumeNotification`,
+  no window needed); the poll loop also spots a sleep from a jump in the wall clock.
 - `peribatt/web.py` — a local-only HTTP server (loopback, per-session token, Host check,
   strict CSP) that serves the settings UI and its JSON API; it starts when the window
   opens and stops ~45 s after it closes.

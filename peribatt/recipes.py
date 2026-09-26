@@ -322,6 +322,8 @@ class RecipeSource:
             lst.close()
         self.listeners = {}
 
+    reset = close          # after sleep: reopen listen-mode devices on the next poll
+
     def readings(self) -> List[Reading]:
         return [lst.reading() for lst in self.listeners.values() if lst.state]
 

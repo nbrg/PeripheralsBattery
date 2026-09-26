@@ -15,7 +15,6 @@ sync_api = pytest.importorskip("playwright.sync_api")
 from peribatt import web
 from peribatt.app import App
 from peribatt.config import Store
-from peribatt.history import History
 from peribatt.model import HEADSET, KEYBOARD, MOUSE, Reading
 
 from .fakes import FakeApi, QueueHandle
@@ -49,10 +48,10 @@ def browser():
 @pytest.fixture
 def demo(tmp_path):
     """An app with the three devices from the README, and one unknown dongle."""
-    app = App(Store(tmp_path / "settings.json"), FakeBackend(), history=History())
+    app = App(Store(tmp_path / "settings.json"), FakeBackend())
     t0 = time.time() - 3 * 3600
     for i, level in enumerate((90, 86, 82, 78)):                  # ~8%/h -> an estimate
-        app.history.record(Reading("logi-1", "PRO Wireless", MOUSE, level), now=t0 + i * 1800)
+        app.estimator.record(Reading("logi-1", "PRO Wireless", MOUSE, level), now=t0 + i * 1800)
     app.clock = time.time
     app.apply([Reading("logi-1", "PRO Wireless", MOUSE, 76),
                Reading("hyperx-16ea", "HyperX Cloud Flight S", HEADSET, 28, charging=True),

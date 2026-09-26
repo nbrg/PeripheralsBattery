@@ -1,27 +1,21 @@
-"""Battery history and time-remaining estimates.
+"""Time-remaining estimates ("~6h left", "full in ~40m").
 
-Every change of level is kept in memory per device (and appended to
-``history.csv`` for anyone who wants to chart it). The estimate is a
-least-squares line through the current discharge (or charge) session, which
-smooths out the jitter of voltage-based readings such as the G PRO's.
+Recent level changes are kept in memory per device - nothing is written to
+disk. The estimate is a least-squares line through the current discharge (or
+charge) session, which smooths out the jitter of voltage-based readings such as
+the G PRO's.
 """
 from __future__ import annotations
 
-import csv
-import logging
 import time
 from collections import deque
-from pathlib import Path
 from typing import Deque, Dict, List, Optional, Tuple
 
 from .model import Reading
 
-log = logging.getLogger("peribatt")
-
 MIN_SPAN_S = 20 * 60          # need 20 minutes of data...
 MIN_DELTA = 2                 # ...and a 2% change before guessing
 MAX_SAMPLES = 256
-MAX_CSV_BYTES = 1_000_000
 
 Sample = Tuple[float, int]
 
@@ -53,44 +47,21 @@ def format_duration(hours: float) -> str:
     return f"{h}h {m:02d}m" if h < 10 else f"{h}h"
 
 
-class History:
-    def __init__(self, csv_path: Optional[Path] = None):
-        self.csv_path = csv_path
+class Estimator:
+    def __init__(self):
         self.sessions: Dict[str, Deque[Sample]] = {}
         self.charging: Dict[str, bool] = {}
-        self.last_level: Dict[str, int] = {}
 
     def record(self, r: Reading, now: Optional[float] = None) -> None:
         if not r.online or r.level is None:
             return
         now = time.time() if now is None else now
         if self.charging.get(r.key) != r.charging:
-            self.sessions[r.key] = deque(maxlen=MAX_SAMPLES)   # new session
+            self.sessions[r.key] = deque(maxlen=MAX_SAMPLES)   # plugged in or out: new session
             self.charging[r.key] = r.charging
         session = self.sessions[r.key]
-        if session and session[-1][1] == r.level:
-            return
-        session.append((now, r.level))
-        if self.last_level.get(r.key) != r.level:
-            self.last_level[r.key] = r.level
-            self._write(now, r)
-
-    def _write(self, now: float, r: Reading) -> None:
-        if not self.csv_path:
-            return
-        try:
-            self.csv_path.parent.mkdir(parents=True, exist_ok=True)
-            if self.csv_path.exists() and self.csv_path.stat().st_size > MAX_CSV_BYTES:
-                self.csv_path.replace(self.csv_path.with_suffix(".old.csv"))
-            new = not self.csv_path.exists()
-            with self.csv_path.open("a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["time", "device", "level", "charging"])
-                w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
-                            r.name, r.level, int(r.charging)])
-        except OSError as e:
-            log.debug("history write: %s", e)
+        if not session or session[-1][1] != r.level:
+            session.append((now, r.level))
 
     def estimate(self, r: Reading) -> Optional[str]:
         """"~6h 10m left" while discharging, "full in ~40m" while charging."""

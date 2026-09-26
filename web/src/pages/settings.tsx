@@ -117,11 +117,9 @@ export function GeneralPage({ state, save }: { state: State; save: Save }) {
           <Choice state={state} save={save} k="poll_seconds" title="Check batteries every"
                   description="Mute and power changes still show up instantly." />
         </Section>
-        <Section title="Startup and data">
+        <Section title="Startup">
           <Toggle s={s} save={save} k="autostart" title="Start with Windows"
                   description="Runs quietly in the tray when you sign in." />
-          <Toggle s={s} save={save} k="history" title="Keep a battery history"
-                  description="Writes history.csv in the data folder, for charts or curiosity." />
         </Section>
       </div>
     </>
@@ -293,7 +291,7 @@ export function AboutPage({ state }: { state: State }) {
           HyperHeadset and OpenRazer; the per-device tray idea was inspired by HaloBattery.
         </Body1>
         <Body1 className={st.sub} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <FolderOpenRegular /> Settings, history and recipes live in %APPDATA%\PeripheralsBattery.
+          <FolderOpenRegular /> Settings, recipes and the log live in %APPDATA%\PeripheralsBattery.
         </Body1>
       </Card>
     </>

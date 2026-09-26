@@ -224,6 +224,13 @@ class HyperXSource:
         self._send(CMD_STATUS, CMD_BATTERY, CMD_CHARGE)
         return self.readings()
 
+    def reset(self) -> None:
+        """After sleep the dongle's handles can be dead without saying so:
+        close them, and the next poll opens it afresh."""
+        with self._lock:
+            self.close()
+            self.state.missed = 0
+
     def poll_fast(self) -> None:
         # Only while the headset is on: a switched-off headset has no mute state.
         if self._writer is not None and self.state.online:

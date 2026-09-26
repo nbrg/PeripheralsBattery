@@ -29,7 +29,6 @@ DEFAULTS: Dict[str, Any] = {
     "headsetcontrol": "",        # path to headsetcontrol.exe ("" = look on PATH)
     "hidden": [],                # device keys the user chose to hide
     "names": {},                 # device key -> name chosen by the user
-    "history": True,             # write history.csv
     "first_run_done": False,     # autostart is switched on once, at the very first launch
 }
 

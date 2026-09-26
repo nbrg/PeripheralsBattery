@@ -232,7 +232,7 @@ class WebUi:
                 "key": key, "name": eff.name, "original": r.name, "kind": r.kind,
                 "level": r.level, "charging": r.charging, "online": r.online, "muted": eff.muted,
                 "note": r.note, "hidden": key in app.store["hidden"],
-                "estimate": app.history.estimate(eff),
+                "estimate": app.estimator.estimate(eff),
                 "icon": f"/api/icon?key={key}&v={r.level}-{int(r.charging)}-{int(r.online)}",
             })
         out["devices"].sort(key=lambda d: (not d["online"], d["name"].lower()))

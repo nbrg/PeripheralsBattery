@@ -41,3 +41,11 @@ def test_shell_helpers():
 def test_real_hidapi_enumerates():
     from peribatt.hidio import HidApi
     assert isinstance(HidApi().enumerate(0), list)
+
+
+def test_power_notifications_register_and_unregister():
+    from peribatt.power import PowerWatcher
+    w = PowerWatcher(lambda: None)
+    assert w.start() is True
+    w.stop()
+    assert not w.registered

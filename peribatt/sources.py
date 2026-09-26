@@ -28,6 +28,11 @@ class Switchable:
     def poll(self) -> List[Reading]:
         return self.source.poll() if self.enabled() else []
 
+    def reset(self) -> None:
+        reset = getattr(self.source, "reset", None)
+        if reset:
+            reset()
+
 
 class Throttled:
     """Polls the wrapped source at most every ``seconds``; in between the last
@@ -47,6 +52,13 @@ class Throttled:
             self._last = self.source.poll()
             self._at = now
         return list(self._last)
+
+    def reset(self) -> None:
+        """Forget the cached result so the next poll asks again (after sleep)."""
+        self._at = None
+        reset = getattr(self.source, "reset", None)
+        if reset:
+            reset()
 
 
 def build_sources(store: Store, on_change: Optional[Callable[[Reading], None]] = None,
