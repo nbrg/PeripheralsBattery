@@ -130,3 +130,18 @@ def test_mic_watcher_reports_changes_only():
         w.step(v)
     assert seen == [False, True, False]
     assert w.supported
+
+
+def test_supported_check_and_reload(tmp_path, monkeypatch):
+    from peribatt import sources
+    from peribatt.recipes import RecipeSource
+    monkeypatch.setenv("PERIBATT_HOME", str(tmp_path))
+    rs = RecipeSource([])
+    check = sources.supported_check([rs, object()])
+    assert check(0x046D, 0x1234) and check(0x1532, 1) and check(0x0951, 0x16EA)
+    assert not check(0x1234, 0x0001)
+    (tmp_path / "recipes.json").write_text(
+        '[{"name": "X", "vendor_id": "0x1234", "product_ids": ["0x0001"],'
+        ' "listen": [{"expect": "01", "level": {"byte": 1}}]}]')
+    sources.reload_recipes([rs])
+    assert (0x1234, 0x0001) in rs.claimed

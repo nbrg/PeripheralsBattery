@@ -139,6 +139,8 @@ def run_tray() -> int:
         app.mic_toggle = mic.toggle
         mic.start()
 
+    wire_windows(app)
+
     for target, name in ((app.poll_loop, "poll"), (app.flash_loop, "flash")):
         threading.Thread(target=target, name=name, daemon=True).start()
     log.info("%s %s started", DISPLAY_NAME, __version__)
@@ -158,12 +160,53 @@ def run_tray() -> int:
     return 0
 
 
+def wire_windows(app) -> None:
+    """Settings window and learn wizard, opened from the tray menu."""
+    from .sources import reload_recipes, supported_check
+    from .ui import UiThread
+
+    ui = UiThread()
+
+    def saved(_recipe):
+        reload_recipes(app.sources)
+        app.refresh_event.set()
+
+    def open_learn():
+        from .learn_ui import open_learn as make
+        ui.show("learn", lambda root: make(root, recipes_path=app_dir() / "recipes.json",
+                                           is_supported=supported_check(app.sources),
+                                           on_saved=saved))
+
+    def open_settings():
+        from .settings_ui import open_settings as make
+        ui.show("settings", lambda root: make(root, app, open_learn=open_learn))
+
+    app.ui = ui
+    app.open_learn = open_learn
+    app.open_settings = open_settings
+
+
+def cmd_learn() -> int:
+    """The wizard on its own: produces a recipe without the tray app running."""
+    from .learn_ui import open_learn
+    from .sources import build_sources, supported_check
+    from .ui import UiThread
+    ui = UiThread()
+    check = supported_check(build_sources(Store.load()))
+    ui.show("learn", lambda root: open_learn(root, recipes_path=app_dir() / "recipes.json",
+                                             is_supported=check))
+    while ui.running:
+        time.sleep(0.2)
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="peribatt",
                                 description=f"{DISPLAY_NAME} - wireless gear battery in the tray")
     p.add_argument("--once", action="store_true", help="print all devices once and exit")
     p.add_argument("--json", action="store_true", help="with --once: JSON output")
     p.add_argument("--probe", action="store_true", help="diagnostics report")
+    p.add_argument("--learn", action="store_true", help="teach the app an unsupported device")
     p.add_argument("--autostart", choices=("on", "off"), help="start with Windows (or not)")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -171,8 +214,14 @@ def main(argv=None) -> int:
     if args.autostart:
         from . import winshell
         winshell.set_autostart(args.autostart == "on")
+        store = Store.load()                  # the installer decided: don't override at first launch
+        store["first_run_done"] = True
+        store.save()
         print(f"Start with Windows: {args.autostart}")
         return 0
+    if args.learn:
+        setup_logging(to_file=False, verbose=args.verbose)
+        return cmd_learn()
     if args.once or args.probe:
         setup_logging(to_file=False, verbose=args.verbose)
         return cmd_probe() if args.probe else cmd_once(args.json)

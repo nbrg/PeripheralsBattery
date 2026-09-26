@@ -51,7 +51,7 @@ class Throttled:
 
 def build_sources(store: Store, on_change: Optional[Callable[[Reading], None]] = None,
                   api=None) -> list:
-    recipes = RecipeSource(load_recipes([app_dir() / "recipes.json"]), api=api)
+    recipes = RecipeSource(load_recipes([app_dir() / "recipes.json"]), api=api, on_change=on_change)
     skip = recipes.claimed | {(HYPERX_VID, pid) for pid in HYPERX_PRODUCTS}
     return [
         LogitechSource(api=api, known=store.logitech_slots),
@@ -62,3 +62,19 @@ def build_sources(store: Store, on_change: Optional[Callable[[Reading], None]] =
         Switchable(XInputSource(), lambda: store["xinput"]),
         Throttled(HeadsetControlSource(store["headsetcontrol"], skip), 300),
     ]
+
+
+def supported_check(sources) -> Callable[[int, int], bool]:
+    """Whether a USB id is already read natively (for the learn wizard's list)."""
+    from .hidpp import LOGITECH_VID
+    from .razer import RAZER_VID
+    claimed = {(HYPERX_VID, pid) for pid in HYPERX_PRODUCTS}
+    for s in sources:
+        claimed |= getattr(s, "claimed", set())
+    return lambda vid, pid: vid in (LOGITECH_VID, RAZER_VID) or (vid, pid) in claimed
+
+
+def reload_recipes(sources) -> None:
+    for s in sources:
+        if isinstance(s, RecipeSource):
+            s.set_recipes(load_recipes([app_dir() / "recipes.json"]))

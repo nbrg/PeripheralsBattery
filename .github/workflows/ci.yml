@@ -24,7 +24,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m ruff check .
-      - run: python -m pytest -q
+      - name: Tests (Linux, windows drawn on a virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -q
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -q
 
   build:
     needs: test
@@ -32,14 +37,55 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+      SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: .\build.bat
+      - name: Tag must match the app version
+        shell: pwsh
+        run: |
+          $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
+          $app = python -c "import peribatt; print(peribatt.__version__)"
+          if ($tag -ne $app) { throw "tag v$tag but peribatt.__version__ is $app" }
+          "VERSION=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build the app
+        run: .\build.bat
         shell: cmd
-      - run: Compress-Archive -Path dist\PeripheralsBattery -DestinationPath PeripheralsBattery-${{ github.ref_name }}-windows.zip
+      - name: Smoke-test the built app
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\PeripheralsBattery\PeripheralsBattery.exe -ArgumentList "--once" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "PeripheralsBattery.exe --once exited with $($p.ExitCode)" }
+      - name: Sign the app
+        shell: pwsh
+        run: installer\sign.ps1 dist\PeripheralsBattery\PeripheralsBattery.exe
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DAppVersion=$env:VERSION" installer\PeripheralsBattery.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+      - name: Sign the installer
+        shell: pwsh
+        run: installer\sign.ps1 "dist\PeripheralsBattery-$env:VERSION-setup.exe"
+      - name: Zip the portable build
+        shell: pwsh
+        run: Compress-Archive -Path dist\PeripheralsBattery -DestinationPath "dist\PeripheralsBattery-$env:VERSION-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PeripheralsBattery-${{ env.VERSION }}
+          path: |
+            dist/PeripheralsBattery-*-setup.exe
+            dist/PeripheralsBattery-*-windows.zip
       - uses: softprops/action-gh-release@v2
         with:
-          files: PeripheralsBattery-${{ github.ref_name }}-windows.zip
+          name: Peripherals Battery ${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            dist/PeripheralsBattery-${{ env.VERSION }}-setup.exe
+            dist/PeripheralsBattery-${{ env.VERSION }}-windows.zip

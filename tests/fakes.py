@@ -1,6 +1,7 @@
 """Fake HID devices that speak just enough of each protocol for the tests."""
 from __future__ import annotations
 
+import time
 from collections import deque
 from typing import Dict, List, Optional
 
@@ -21,7 +22,7 @@ class FakeApi:
         self.handles[path] = handle
 
     def enumerate(self, vid):
-        return [d for d in self.infos if d["vendor_id"] == vid]
+        return [d for d in self.infos if vid in (0, d["vendor_id"])]      # 0 = everything, like hidapi
 
     def open(self, path):
         h = self.handles[path]
@@ -48,7 +49,11 @@ class QueueHandle:
         pass
 
     def read(self, n, timeout_ms=0):
-        return list(self.inbox.popleft()) if self.inbox else []
+        if self.inbox:
+            return list(self.inbox.popleft())
+        if timeout_ms and not self.closed:
+            time.sleep(min(timeout_ms, 10) / 1000)     # behave like a blocking read, briefly
+        return []
 
     def close(self):
         self.closed = True

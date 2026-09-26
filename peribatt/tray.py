@@ -144,6 +144,10 @@ class PystrayBackend:
             # at the top always match the icons.
             out = [Item(line, None, enabled=False) for line in (app.menu_status() or ["No devices yet"])]
             out.append(Menu.SEPARATOR)
+            if app.open_settings:
+                out.append(Item("Settings…", lambda: app.open_settings()))
+            if app.open_learn:
+                out.append(Item("Learn a new device…", lambda: app.open_learn()))
             reading = app.readings.get(key)
             if reading is not None and reading.kind == HEADSET and app.mic_toggle:
                 out.append(Item("Toggle mic mute", lambda: app.mic_toggle(), default=True))

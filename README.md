@@ -31,6 +31,11 @@ All thresholds can be changed in `settings.json`.
 - **Notifications**: low battery (once per discharge) and "fully charged, unplug it".
 - **Starts with Windows** (switched on at first launch; untick it in the menu).
 - **Remembers your devices**: a mouse that is off at boot still gets its grey icon.
+- **Settings window**: thresholds, notifications, sources, and a device list where
+  you can rename, hide or forget devices - no JSON editing needed.
+- **Learn a new device**: a wizard that listens to an unsupported USB dongle while
+  you mute/unmute and plug/unplug it, finds the battery, mute and charging bytes,
+  and saves them as a shareable recipe.
 - **Battery history** in `history.csv` for anyone who wants to chart it.
 - **Device recipes**: support for a new request/reply headset is a few lines of JSON, no code.
 - `--once` / `--json` for scripts and widgets, `--probe` for diagnostics.
@@ -68,9 +73,18 @@ can be added as a recipe once someone captures the reports (see
 
 ## Install
 
-**Ready-made:** download `PeripheralsBattery-vX.Y.Z-windows.zip` from Releases,
-unzip it somewhere permanent (e.g. `C:\Tools\PeripheralsBattery`), and run
-`PeripheralsBattery.exe`. That's it. It adds itself to startup the first time.
+**Installer (recommended):** download `PeripheralsBattery-X.Y.Z-setup.exe` from
+[Releases](../../releases/latest) and run it. It installs for your user only (no
+admin prompt), adds a Start menu entry, and asks whether to start with Windows.
+Uninstall from *Settings > Apps* as usual.
+
+**Portable:** download `PeripheralsBattery-X.Y.Z-windows.zip`, unzip it somewhere
+permanent (e.g. `C:\Tools\PeripheralsBattery`) and run `PeripheralsBattery.exe`.
+It adds itself to startup the first time.
+
+If Windows SmartScreen says "Windows protected your PC", the build is unsigned:
+choose *More info > Run anyway*. See [docs/signing.md](docs/signing.md) for how
+releases get signed.
 
 **From source** (Python 3.10+):
 
@@ -86,7 +100,8 @@ Close vendor apps that hold the device exclusively if a device doesn't show up
 
 ## Tray menu
 
-Refresh now · Poll interval (30 s – 5 min) · Low battery alert (off, 10–25 %) ·
+Settings… · Learn a new device… · Refresh now · Poll interval (30 s – 5 min) ·
+Low battery alert (off, 10–25 %) ·
 Display (percentage instead of picture, mute blink, Windows mic mute, full-charge
 notification) · Sources (Bluetooth, controllers) · Hide this device · Forget
 disconnected devices · Open data folder · Start with Windows · Exit
@@ -97,6 +112,7 @@ disconnected devices · Open data folder · Start with Windows · Exit
 python -m peribatt                 run the tray app
 python -m peribatt --once [--json] print all devices once
 python -m peribatt --probe         diagnostics report for bug reports
+python -m peribatt --learn         the learn-a-device wizard on its own
 python -m peribatt --autostart on  start with Windows (or: off)
 ```
 
@@ -120,6 +136,10 @@ sources (one per protocol)                 app core                 front end
 - `peribatt/render.py` — vector pictograms, drawn 4× and box-filtered down; results are cached.
 - `peribatt/hidpp.py`, `hyperx.py`, `razer.py`, `recipes.py`, `bluetooth.py`, `xinput.py`, `hsc.py` — the providers.
 - `peribatt/micmute.py` — Windows Core Audio via raw COM (ctypes, no pywin32).
+- `peribatt/prefs.py` + `settings_ui.py` — the settings window (logic / widgets).
+- `peribatt/learn.py` + `learn_ui.py` — the learn wizard (capture and analysis / widgets).
+- `peribatt/ui.py` — a Tk thread that only exists while a window is open.
+- `installer/` — Inno Setup script and the signing step used by CI.
 
 Efficiency choices: the HyperX reader threads block on the device and wake only
 for data; the blink thread sleeps until a mic is muted; Bluetooth is scanned every
@@ -135,9 +155,15 @@ ruff check . && pytest -q
 python docs/make_preview.py      # regenerate docs/icons.png
 ```
 
-The tests run on Linux and Windows (CI does both). The device protocols are
-tested against fake devices in `tests/fakes.py`, and the whole app is started and
-exited through a fake `pystray`.
+The tests run on Linux and Windows (CI does both; on Linux the windows are drawn
+on a virtual display with `xvfb-run`). The device protocols are tested against
+fake devices in `tests/fakes.py`, the whole app is started and exited through a
+fake `pystray`, the settings window and the learn wizard are driven click by
+click, and on Windows the native API bindings are exercised for real.
+
+**Releasing:** bump `peribatt/__init__.py`, then push a tag `vX.Y.Z`. CI builds
+the app, smoke-tests it, signs it (when a certificate is configured), builds the
+installer and attaches both to a GitHub release.
 
 ## Credits / prior art
 

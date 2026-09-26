@@ -17,6 +17,15 @@ exchange as data, so most headsets can be added without writing Python.
       ]
     }
 
+Devices that *push* their state (a mute button, a periodic battery report)
+get "listen" rules - the same shape as a step, without "write"::
+
+      "listen": [{"expect": "0b 00 bb 08", "muted": {"byte": 4, "in": [1]}}]
+
+A recipe with listen rules keeps the device open and applies every incoming
+report to the rules (steps with an "expect" count as rules too, so their
+replies are picked up the same way), so changes show up immediately.
+
 Byte positions are counted in the reply exactly as hidapi returns it. Every
 field is optional; a step without "expect" accepts the first reply. Bundled
 recipes live in ``recipes.json`` next to this file, and extra ones can be put
@@ -26,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -96,7 +106,7 @@ class Step:
 
     @classmethod
     def parse(cls, spec) -> "Step":
-        data = _bytes(spec["write"])
+        data = _bytes(spec.get("write", ""))
         pad = _int(spec.get("pad_to", 0))
         if pad > len(data):
             data += bytes(pad - len(data))
@@ -127,14 +137,24 @@ class Recipe:
     steps: List[Step]
     kind: str = DEVICE
     match: Dict[str, int] = field(default_factory=dict)
+    listen: List[Step] = field(default_factory=list)
 
     @classmethod
     def parse(cls, spec: dict) -> "Recipe":
-        return cls(name=spec["name"], vendor_id=_int(spec["vendor_id"]),
-                   product_ids=[_int(p) for p in spec["product_ids"]],
-                   steps=[Step.parse(s) for s in spec["steps"]],
-                   kind=spec.get("kind", DEVICE),
-                   match={k: _int(v) for k, v in (spec.get("match") or {}).items()})
+        r = cls(name=spec["name"], vendor_id=_int(spec["vendor_id"]),
+                product_ids=[_int(p) for p in spec["product_ids"]],
+                steps=[Step.parse(s) for s in spec.get("steps", [])],
+                kind=spec.get("kind", DEVICE),
+                match={k: _int(v) for k, v in (spec.get("match") or {}).items()},
+                listen=[Step.parse(s) for s in spec.get("listen", [])])
+        if not r.steps and not r.listen:
+            raise ValueError("a recipe needs steps or listen rules")
+        return r
+
+    @property
+    def rules(self) -> List[Step]:
+        """What incoming reports are matched against in listen mode."""
+        return [s for s in self.steps if s.expect and s.fields] + self.listen
 
     def picks(self, info: dict) -> bool:
         keymap = {"usage_page": "usage_page", "usage": "usage", "interface": "interface_number"}
@@ -183,16 +203,127 @@ def evaluate(step: Step, reply: Sequence[int]) -> Dict[str, object]:
     return out
 
 
+class Listener:
+    """Keeps one listen-mode device open: a reader thread per collection feeds
+    every report through the recipe's rules; :meth:`request` sends the
+    recipe's queries, whose replies arrive through the same readers."""
+
+    def __init__(self, recipe: Recipe, key: str, infos: List[dict], api,
+                 on_change: Optional[Callable[[Reading], None]] = None, threaded: bool = True):
+        self.recipe, self.key, self.infos, self.api = recipe, key, infos, api
+        self.on_change = on_change
+        self.threaded = threaded
+        self.state: Dict[str, object] = {}
+        self.handles: List[object] = []
+        self.writer = None
+        self.lost = False
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+
+    def open(self) -> bool:
+        ranked = []                                   # (rank, handle): where queries go
+        for d in self.infos:
+            if d.get("usage_page") == 0x01:          # keyboard/mouse: owned by Windows
+                continue
+            try:
+                h = self.api.open(d["path"])
+            except OSError:
+                continue
+            self.handles.append(h)
+            rank = 0 if self.recipe.match and self.recipe.picks(d) else \
+                1 if d.get("usage_page", 0) >= 0xFF00 else 2
+            ranked.append((rank, len(ranked), h))
+            if self.threaded:
+                threading.Thread(target=self._reader, args=(h,), daemon=True,
+                                 name=f"recipe-{self.key}").start()
+        self.writer = min(ranked)[2] if ranked else None
+        return bool(self.handles)
+
+    def close(self) -> None:
+        self._stop.set()
+        for h in self.handles:
+            try:
+                h.close()
+            except Exception:
+                pass
+        self.handles, self.writer = [], None
+
+    def _reader(self, handle) -> None:
+        while not self._stop.is_set():
+            try:
+                report = handle.read(64, 5000)
+            except (OSError, ValueError):
+                if not self._stop.is_set():
+                    self.lost = True
+                return
+            if report:
+                self.feed(report)
+
+    def feed(self, report: Sequence[int]) -> None:
+        changes: Dict[str, object] = {}
+        for rule in self.recipe.rules:
+            if rule.accepts(report):
+                changes.update(evaluate(rule, report))
+        if not changes:
+            return
+        with self._lock:
+            before = self.reading()
+            self.state.update(changes)
+            if changes.get("level") is not None and "offline" not in changes:
+                self.state["offline"] = False
+            after = self.reading()
+        if after != before and self.on_change:
+            self.on_change(after)
+
+    def request(self) -> None:
+        for step in self.recipe.steps:
+            if not step.write or self.writer is None:
+                continue
+            try:
+                if step.feature:
+                    self.writer.send_feature_report(step.write)
+                    self.feed(self.writer.get_feature_report(step.write[0], step.read_len))
+                else:
+                    self.writer.write(step.write)
+            except (OSError, ValueError):
+                self.lost = True
+
+    def reading(self) -> Reading:
+        st = self.state
+        online = not st.get("offline") and not self.lost
+        return Reading(self.key, self.recipe.name, self.recipe.kind, st.get("level"),
+                       bool(st.get("charging")) and online, online=online,
+                       muted=bool(st.get("muted")) and online,
+                       note="" if online else "switched off")
+
+
 class RecipeSource:
     name = "recipes"
 
     def __init__(self, recipes: Sequence[Recipe], api=None,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 on_change: Optional[Callable[[Reading], None]] = None, threaded: bool = True):
         self.recipes = list(recipes)
         self.api = api or HidApi()
         self.clock = clock
+        self.on_change = on_change
+        self.threaded = threaded
         self.last: Dict[str, Reading] = {}
+        self.listeners: Dict[str, Listener] = {}
         self.log: List[str] = []
+
+    def set_recipes(self, recipes: Sequence[Recipe]) -> None:
+        """Swap in a new recipe list (after the learn wizard saved one)."""
+        self.close()
+        self.recipes = list(recipes)
+
+    def close(self) -> None:
+        for lst in self.listeners.values():
+            lst.close()
+        self.listeners = {}
+
+    def readings(self) -> List[Reading]:
+        return [lst.reading() for lst in self.listeners.values() if lst.state]
 
     @property
     def claimed(self) -> set:
@@ -250,6 +381,11 @@ class RecipeSource:
             infos = self.api.enumerate(vid)
             for recipe in recipes:
                 for pid in recipe.product_ids:
+                    if recipe.listen:
+                        r = self._listen(recipe, pid, [d for d in infos if d.get("product_id") == pid])
+                        if r:
+                            out.append(r)
+                        continue
                     candidates = [d for d in infos if d.get("product_id") == pid and recipe.picks(d)]
                     if not candidates:
                         continue
@@ -262,3 +398,27 @@ class RecipeSource:
                         out.append(r)
                     break
         return out
+
+    def _listen(self, recipe: Recipe, pid: int, infos: List[dict]) -> Optional[Reading]:
+        key = f"hid-{recipe.vendor_id:04x}-{pid:04x}"
+        lst = self.listeners.get(key)
+        if lst is not None and (lst.lost or not infos):
+            lst.close()
+            self.listeners.pop(key)
+            lst = None
+        if lst is None and infos:
+            lst = Listener(recipe, key, infos, self.api, self.on_change, self.threaded)
+            if lst.open():
+                self.listeners[key] = lst
+            else:
+                lst = None
+        if lst is None:
+            prev = self.last.get(key)
+            return prev.with_(online=False, charging=False, muted=False,
+                              note="not connected") if prev else None
+        lst.request()
+        if not lst.state:
+            return None
+        r = lst.reading()
+        self.last[key] = r
+        return r

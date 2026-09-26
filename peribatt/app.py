@@ -68,6 +68,8 @@ class App:
         self.theme_probe = light_taskbar
         self.light = light_taskbar()
         self.mic_toggle: Optional[Callable[[], None]] = None
+        self.open_settings: Optional[Callable[[], None]] = None    # set when a UI is available
+        self.open_learn: Optional[Callable[[], None]] = None
         self.clock = clock
         self.readings: Dict[str, Reading] = {}
         self.shown: Dict[str, tuple] = {}         # key -> cache key of the image on screen
@@ -91,10 +93,22 @@ class App:
                                          info.get("level"), online=False, note="not found yet")
 
     def effective(self, r: Reading) -> Reading:
+        """The reading as shown: user-chosen name, Windows mic mute folded in."""
+        alias = self.store["names"].get(r.key)
+        if alias and alias != r.name:
+            r = r.with_(name=alias)
         if not r.online:
             return r
         muted = r.muted or (self.store["windows_mute"] and self.windows_muted and r.kind == HEADSET)
         return r.with_(muted=muted) if muted != r.muted else r
+
+    def rename(self, key: str, name: str) -> None:
+        names = dict(self.store["names"])
+        if name.strip():
+            names[key] = name.strip()
+        else:
+            names.pop(key, None)
+        self.set_setting("names", names)
 
     def apply(self, readings: Sequence[Reading]) -> None:
         """Results of a full poll. Devices that went missing turn grey."""
@@ -135,7 +149,7 @@ class App:
             self.store.devices[r.key] = {"name": r.name, "kind": r.kind, "level": r.level}
         self._draw(r.key)                      # before alerts: a notification needs the icon
         if r.online:
-            self._alerts(r)
+            self._alerts(self.effective(r))
 
     def set_windows_muted(self, muted: bool) -> None:
         with self.lock:
