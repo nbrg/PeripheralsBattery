@@ -1,38 +1,75 @@
 import { useCallback, useEffect, useState } from "react"
 import {
-  BellRingIcon,
-  CableIcon,
-  InfoIcon,
-  LayoutGridIcon,
-  PaletteIcon,
-  SlidersHorizontalIcon,
-  SparklesIcon,
-  WifiOffIcon,
-} from "lucide-react"
+  Caption1,
+  FluentProvider,
+  Tab,
+  TabList,
+  Text,
+  makeStyles,
+  tokens,
+} from "@fluentui/react-components"
+import {
+  AlertRegular,
+  AppsListRegular,
+  InfoRegular,
+  PaintBrushRegular,
+  PlugConnectedRegular,
+  SettingsRegular,
+  SparkleRegular,
+  WifiOffRegular,
+} from "@fluentui/react-icons"
 
-import { Toaster } from "@/components/ui/sonner"
+import { NotifyProvider } from "@/components/notify"
+import { useSystemTheme } from "@/components/theme"
 import { api, iconUrl, type State } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { DevicesPage } from "@/pages/devices"
 import { LearnPage } from "@/pages/learn"
 import { AboutPage, AlertsPage, AppearancePage, GeneralPage, SourcesPage, useSave } from "@/pages/settings"
 
 const NAV = [
-  { id: "devices", label: "Devices", icon: LayoutGridIcon },
-  { id: "general", label: "General", icon: SlidersHorizontalIcon },
-  { id: "alerts", label: "Alerts & colours", icon: BellRingIcon },
-  { id: "appearance", label: "Appearance", icon: PaletteIcon },
-  { id: "sources", label: "Sources", icon: CableIcon },
-  { id: "learn", label: "Learn a device", icon: SparklesIcon },
-  { id: "about", label: "About", icon: InfoIcon },
+  { id: "devices", label: "Devices", icon: <AppsListRegular /> },
+  { id: "general", label: "General", icon: <SettingsRegular /> },
+  { id: "alerts", label: "Alerts & colours", icon: <AlertRegular /> },
+  { id: "appearance", label: "Appearance", icon: <PaintBrushRegular /> },
+  { id: "sources", label: "Sources", icon: <PlugConnectedRegular /> },
+  { id: "learn", label: "Learn a device", icon: <SparkleRegular /> },
+  { id: "about", label: "About", icon: <InfoRegular /> },
 ] as const
+
+const useStyles = makeStyles({
+  shell: { display: "flex", height: "100vh", overflow: "hidden", backgroundColor: tokens.colorNeutralBackground2 },
+  side: {
+    display: "flex",
+    flexDirection: "column",
+    width: "232px",
+    flexShrink: 0,
+    padding: "20px 8px 16px",
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  brand: { display: "flex", alignItems: "center", gap: "12px", padding: "4px 12px 20px" },
+  brandText: { display: "grid", lineHeight: 1.2 },
+  muted: { color: tokens.colorNeutralForeground3 },
+  tabs: { gap: "2px" },
+  count: { marginLeft: "auto", paddingLeft: "12px", color: tokens.colorNeutralForeground3 },
+  foot: { marginTop: "auto", display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" },
+  main: {
+    flex: 1,
+    overflowY: "auto",
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTopLeftRadius: tokens.borderRadiusXLarge,
+    boxShadow: tokens.shadow4,
+    margin: "8px 0 0",
+  },
+  content: { maxWidth: "820px", margin: "0 auto", padding: "32px 40px" },
+})
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, "")
   return NAV.some((n) => n.id === id) ? id : "devices"
 }
 
-export default function App() {
+function Shell({ dark }: { dark: boolean }) {
+  const s = useStyles()
   const [page, setPage] = useState(pageFromHash)
   const [state, setState] = useState<State | null>(null)
   const [offline, setOffline] = useState(false)
@@ -60,14 +97,6 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [refresh])
 
-  // Icons are drawn for the theme: redraw them when Windows switches light/dark.
-  const [, setThemeTick] = useState(0)
-  useEffect(() => {
-    const onTheme = () => setThemeTick((n) => n + 1)
-    window.addEventListener("peribatt-theme", onTheme)
-    return () => window.removeEventListener("peribatt-theme", onTheme)
-  }, [])
-
   useEffect(() => {
     const onHash = () => setPage(pageFromHash())
     window.addEventListener("hashchange", onHash)
@@ -83,41 +112,33 @@ export default function App() {
   const current = standalone && page !== "about" ? "learn" : page
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="bg-sidebar text-sidebar-foreground border-sidebar-border flex w-60 shrink-0 flex-col border-r">
-        <div className="flex items-center gap-3 px-5 pt-6 pb-5">
-          <img src={iconUrl({ kind: "headset", level: 70, charging: true, size: 32 })} alt="" className="size-8" />
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">Peripherals Battery</div>
-            <div className="text-muted-foreground text-xs">{state ? `v${state.version}` : " "}</div>
+    <div className={s.shell} data-theme={dark ? "dark" : "light"}>
+      <aside className={s.side}>
+        <div className={s.brand}>
+          <img src={iconUrl({ kind: "headset", level: 70, charging: true, size: 32 })} alt="" width={32} height={32} />
+          <div className={s.brandText}>
+            <Text weight="semibold">Peripherals Battery</Text>
+            <Caption1 className={s.muted}>{state ? `v${state.version}` : " "}</Caption1>
           </div>
         </div>
-        <nav className="grid gap-0.5 px-3" aria-label="Sections">
-          {nav.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => go(id)} aria-current={current === id ? "page" : undefined}
-                    className={cn(
-                      "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors",
-                      current === id
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground")}>
-              <Icon className="size-4" /> {label}
+        <TabList vertical size="large" selectedValue={current} className={s.tabs} aria-label="Sections"
+                 onTabSelect={(_, d) => go(String(d.value))}>
+          {nav.map(({ id, label, icon }) => (
+            <Tab key={id} value={id} icon={icon}>
+              {label}
               {id === "devices" && state && state.devices.length > 0 && (
-                <span className="text-muted-foreground ml-auto text-xs tabular-nums">{state.devices.length}</span>
+                <span className={s.count}>{state.devices.length}</span>
               )}
-            </button>
+            </Tab>
           ))}
-        </nav>
-        <div className="mt-auto p-4">
-          {offline && (
-            <div className="text-muted-foreground flex items-center gap-2 text-xs">
-              <WifiOffIcon className="size-3.5" /> The tray app has closed.
-            </div>
-          )}
-        </div>
+        </TabList>
+        {offline && (
+          <Caption1 className={`${s.foot} ${s.muted}`}><WifiOffRegular /> The tray app has closed.</Caption1>
+        )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-8 py-8">
+      <main className={s.main}>
+        <div className={s.content}>
           {current === "devices" && <DevicesPage state={state} refresh={refresh} go={go} />}
           {current === "learn" && <LearnPage />}
           {state && current === "general" && <GeneralPage state={state} save={save} />}
@@ -127,7 +148,17 @@ export default function App() {
           {state && current === "about" && <AboutPage state={state} />}
         </div>
       </main>
-      <Toaster position="bottom-right" />
     </div>
+  )
+}
+
+export default function App() {
+  const { theme, dark } = useSystemTheme()
+  return (
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+      <NotifyProvider>
+        <Shell dark={dark} />
+      </NotifyProvider>
+    </FluentProvider>
   )
 }

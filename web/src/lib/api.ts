@@ -126,6 +126,6 @@ export function iconUrl(p: {
 /** Adds the session token (images can't send headers) and the page theme, so
  *  icons are drawn dark-on-light or light-on-dark like on a real taskbar. */
 export function withToken(url: string) {
-  const light = document.documentElement.classList.contains("dark") ? "0" : "1"
+  const light = document.documentElement.dataset.theme === "dark" ? "0" : "1"
   return `${url}&light=${light}&t=${encodeURIComponent(token)}`
 }

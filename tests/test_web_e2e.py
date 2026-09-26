@@ -113,29 +113,29 @@ def test_settings_pages_save_instantly(browser, demo):
     sync_api.expect(page.get_by_role("heading", name="General")).to_be_visible()
     shot(page, "general")
 
-    page.get_by_role("button", name="Appearance").click()
+    page.get_by_role("tab", name="Appearance").click()
     page.get_by_role("switch", name="Blink the headset icon while its mic is muted").click()
-    sync_api.expect(page.get_by_text("Saved")).to_be_visible()
+    sync_api.expect(page.locator(".fui-ToastTitle", has_text="Saved")).to_be_visible()
     assert app.store["flash_on_mute"] is False
     shot(page, "appearance")
 
-    page.get_by_role("button", name="Alerts & colours").click()
+    page.get_by_role("tab", name="Alerts & colours").click()
     preview = page.get_by_test_id("icon-preview")
     sync_api.expect(preview).to_be_visible()
     page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
     shot(page, "alerts")
-    # keyboard on the slider: move the lower (red) thumb up by 5
-    thumb = page.get_by_role("slider").first
-    thumb.focus()
+    # keyboard on the slider: move the red limit up by 5
+    red = page.get_by_role("slider", name="Red below")
+    red.focus()
     for _ in range(5):
-        thumb.press("ArrowRight")
-    sync_api.expect(page.get_by_text("Red below 25%")).to_be_visible()
+        red.press("ArrowRight")
+    sync_api.expect(red).to_have_value("25")
     deadline = time.time() + 5
     while app.store["low"] != 25 and time.time() < deadline:
         time.sleep(0.05)
     assert app.store["low"] == 25
 
-    page.get_by_role("button", name="Sources").click()
+    page.get_by_role("tab", name="Sources").click()
     shot(page, "sources")
     page.close()
 

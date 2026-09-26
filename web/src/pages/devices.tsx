@@ -1,51 +1,47 @@
 import { useState } from "react"
 import {
-  BatteryChargingIcon,
-  EyeIcon,
-  EyeOffIcon,
-  MicOffIcon,
-  MoreHorizontalIcon,
-  PencilIcon,
-  PlugZapIcon,
-  PowerOffIcon,
-  SparklesIcon,
-  Trash2Icon,
-} from "lucide-react"
-import { toast } from "sonner"
-
-import { BatteryBar } from "@/components/battery"
-import { PageHeader } from "@/components/setting-row"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import {
+  Badge,
+  Body1,
+  Button,
+  Caption1,
+  Card,
   Dialog,
+  DialogActions,
+  DialogBody,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
+  DialogSurface,
   DialogTitle,
-} from "@/components/ui/dialog"
+  Field,
+  Input,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  Skeleton,
+  SkeletonItem,
+  Subtitle2,
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from "@fluentui/react-components"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+  BatteryChargeRegular,
+  DeleteRegular,
+  EditRegular,
+  EyeOffRegular,
+  EyeRegular,
+  MicOffRegular,
+  MoreHorizontalRegular,
+  PlugDisconnectedRegular,
+  PowerRegular,
+  SparkleRegular,
+} from "@fluentui/react-icons"
+
+import { BatteryBar, PageHeader } from "@/components/common"
+import { useNotify } from "@/components/notify"
 import { api, withToken, type Device, type State } from "@/lib/api"
 
 const KIND_LABEL: Record<string, string> = {
@@ -56,21 +52,61 @@ const KIND_LABEL: Record<string, string> = {
   device: "Device",
 }
 
+const useStyles = makeStyles({
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: "16px" },
+  card: { padding: "20px", gap: "18px" },
+  dim: { opacity: 0.6 },
+  top: { display: "flex", alignItems: "flex-start", gap: "16px" },
+  iconTile: {
+    display: "grid",
+    placeItems: "center",
+    width: "56px",
+    height: "56px",
+    flexShrink: 0,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  titleBox: { minWidth: 0, flex: 1, display: "grid", gap: "2px" },
+  name: {
+    display: "-webkit-box",
+    WebkitLineClamp: "2",
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+    lineHeight: tokens.lineHeightBase400,
+  },
+  sub: { color: tokens.colorNeutralForeground3 },
+  badges: { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" },
+  levelRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" },
+  level: { fontSize: "32px", lineHeight: "36px", fontWeight: tokens.fontWeightSemibold, letterSpacing: "-0.5px" },
+  empty: {
+    display: "grid",
+    justifyItems: "center",
+    gap: "12px",
+    padding: "56px 24px",
+    textAlign: "center",
+    border: `1px dashed ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusXLarge,
+  },
+  emptyIcon: { fontSize: "40px", color: tokens.colorNeutralForeground3 },
+})
+
 export function DevicesPage({ state, refresh, go }: {
   state: State | null
   refresh: () => void
   go: (page: string) => void
 }) {
+  const s = useStyles()
+  const notify = useNotify()
   const [renaming, setRenaming] = useState<Device | null>(null)
   const [forgetting, setForgetting] = useState<Device | null>(null)
 
   async function act(d: Device, action: "hide" | "show" | "forget", done: string) {
     try {
       await api.device(d.key, action)
-      toast.success(done)
+      notify(done)
       refresh()
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
     }
   }
 
@@ -80,31 +116,26 @@ export function DevicesPage({ state, refresh, go }: {
       <PageHeader
         title="Devices"
         description="Everything the app has found. Each one gets its own tray icon."
-        actions={<Button variant="outline" size="sm" onClick={() => go("learn")}>
-          <SparklesIcon /> Learn a new device
-        </Button>}
+        actions={<Button icon={<SparkleRegular />} onClick={() => go("learn")}>Learn a new device</Button>}
       />
 
       {state === null ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {[0, 1].map((i) => <Skeleton key={i} className="h-36 rounded-xl" />)}
-        </div>
+        <Skeleton className={s.grid} aria-label="Loading devices">
+          <SkeletonItem style={{ height: 150, borderRadius: 12 }} />
+          <SkeletonItem style={{ height: 150, borderRadius: 12 }} />
+        </Skeleton>
       ) : devices.length === 0 ? (
-        <Empty className="border border-dashed">
-          <EmptyHeader>
-            <EmptyMedia variant="icon"><PlugZapIcon /></EmptyMedia>
-            <EmptyTitle>No devices yet</EmptyTitle>
-            <EmptyDescription>
-              Switch your wireless gear on and plug in its receiver. Bluetooth devices appear as soon as
-              Windows shows their battery.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button variant="outline" onClick={() => go("learn")}><SparklesIcon /> Learn a new device</Button>
-          </EmptyContent>
-        </Empty>
+        <div className={s.empty}>
+          <PlugDisconnectedRegular className={s.emptyIcon} />
+          <Subtitle2>No devices yet</Subtitle2>
+          <Body1 className={s.sub}>
+            Switch your wireless gear on and plug in its receiver. Bluetooth devices appear as soon as Windows
+            shows their battery.
+          </Body1>
+          <Button icon={<SparkleRegular />} onClick={() => go("learn")}>Learn a new device</Button>
+        </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2" data-testid="device-grid">
+        <div className={s.grid} data-testid="device-grid">
           {devices.map((d) => (
             <DeviceCard key={d.key} d={d} low={state.settings.low} warn={state.settings.warn}
                         onRename={() => setRenaming(d)}
@@ -117,23 +148,24 @@ export function DevicesPage({ state, refresh, go }: {
 
       <RenameDialog device={renaming} onClose={() => setRenaming(null)} onDone={refresh} />
 
-      <AlertDialog open={forgetting !== null} onOpenChange={(o) => !o && setForgetting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Forget {forgetting?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its grey icon and remembered battery level are removed. It comes back automatically the next
-              time it is switched on.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => forgetting && act(forgetting, "forget", `${forgetting.name} forgotten`)}>
-              Forget
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <Dialog open={forgetting !== null} onOpenChange={(_, data) => !data.open && setForgetting(null)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Forget {forgetting?.name}?</DialogTitle>
+            <DialogContent>
+              Its grey icon and remembered battery level are removed. It comes back automatically the next time
+              it is switched on.
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setForgetting(null)}>Cancel</Button>
+              <Button appearance="primary" onClick={() => {
+                if (forgetting) act(forgetting, "forget", `${forgetting.name} forgotten`)
+                setForgetting(null)
+              }}>Forget</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </>
   )
 }
@@ -146,64 +178,56 @@ function DeviceCard({ d, low, warn, onRename, onToggle, onForget }: {
   onToggle: () => void
   onForget: () => void
 }) {
+  const s = useStyles()
   return (
-    <Card className={d.hidden ? "opacity-60" : ""} data-testid="device-card">
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex items-start gap-4">
-          <div className="bg-muted/60 dark:bg-muted/40 grid size-14 shrink-0 place-items-center rounded-xl">
-            <img src={withToken(`${d.icon}&size=48`)} alt="" width={40} height={40} className="size-10" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="line-clamp-2 font-medium leading-snug" title={d.name}>{d.name}</h3>
-            </div>
-            <p className="text-muted-foreground truncate text-[13px]">
-              {KIND_LABEL[d.kind] ?? "Device"}
-              {d.name !== d.original && <> · {d.original}</>}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {!d.online && <Badge variant="outline"><PowerOffIcon /> {d.note || "Off"}</Badge>}
-              {d.online && d.charging && (
-                <Badge className="bg-battery-charging/15 text-battery-charging border-battery-charging/30">
-                  <BatteryChargingIcon /> Charging
-                </Badge>
-              )}
-              {d.online && d.muted && (
-                <Badge variant="destructive"><MicOffIcon /> Mic muted</Badge>
-              )}
-              {d.hidden && <Badge variant="secondary"><EyeOffIcon /> Hidden</Badge>}
-            </div>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${d.name}`}>
-                <MoreHorizontalIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onRename}><PencilIcon /> Rename</DropdownMenuItem>
-              <DropdownMenuItem onSelect={onToggle}>
-                {d.hidden ? <><EyeIcon /> Show in tray</> : <><EyeOffIcon /> Hide from tray</>}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" disabled={d.online} onSelect={onForget}>
-                <Trash2Icon /> Forget
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+    <Card className={mergeClasses(s.card, d.hidden && s.dim)} data-testid="device-card">
+      <div className={s.top}>
+        <div className={s.iconTile}>
+          <img src={withToken(`${d.icon}&size=48`)} alt="" width={40} height={40} />
         </div>
-        <div className="grid gap-2">
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-semibold tabular-nums tracking-tight">
-              {d.level === null ? "–" : `${d.note === "approximate" ? "~" : ""}${d.level}%`}
-            </span>
-            <span className="text-muted-foreground text-[13px]">
-              {d.online ? d.estimate ?? (d.charging ? "Charging" : "") : "Last known level"}
-            </span>
+        <div className={s.titleBox}>
+          <Text as="h3" weight="semibold" size={400} className={s.name} title={d.name} style={{ margin: 0 }}>
+            {d.name}
+          </Text>
+          <Caption1 className={s.sub}>
+            {KIND_LABEL[d.kind] ?? "Device"}{d.name !== d.original && <> · {d.original}</>}
+          </Caption1>
+          <div className={s.badges}>
+            {!d.online && <Badge appearance="outline" color="subtle" icon={<PowerRegular />}>{d.note || "Off"}</Badge>}
+            {d.online && d.charging && (
+              <Badge appearance="tint" color="success" icon={<BatteryChargeRegular />}>Charging</Badge>
+            )}
+            {d.online && d.muted && <Badge appearance="filled" color="danger" icon={<MicOffRegular />}>Mic muted</Badge>}
+            {d.hidden && <Badge appearance="tint" color="informative" icon={<EyeOffRegular />}>Hidden</Badge>}
           </div>
-          <BatteryBar level={d.level} charging={d.charging} online={d.online} low={low} warn={warn} />
         </div>
-      </CardContent>
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            <Button appearance="subtle" icon={<MoreHorizontalRegular />} aria-label={`Actions for ${d.name}`} />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem icon={<EditRegular />} onClick={onRename}>Rename</MenuItem>
+              <MenuItem icon={d.hidden ? <EyeRegular /> : <EyeOffRegular />} onClick={onToggle}>
+                {d.hidden ? "Show in tray" : "Hide from tray"}
+              </MenuItem>
+              <MenuDivider />
+              <MenuItem icon={<DeleteRegular />} disabled={d.online} onClick={onForget}>Forget</MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      </div>
+      <div>
+        <div className={s.levelRow}>
+          <span className={s.level}>
+            {d.level === null ? "–" : `${d.note === "approximate" ? "~" : ""}${d.level}%`}
+          </span>
+          <Caption1 className={s.sub}>
+            {d.online ? d.estimate ?? (d.charging ? "Charging" : "") : "Last known level"}
+          </Caption1>
+        </div>
+        <BatteryBar level={d.level} charging={d.charging} online={d.online} low={low} warn={warn} />
+      </div>
     </Card>
   )
 }
@@ -213,6 +237,7 @@ function RenameDialog({ device, onClose, onDone }: {
   onClose: () => void
   onDone: () => void
 }) {
+  const notify = useNotify()
   const [name, setName] = useState("")
   const [prev, setPrev] = useState<Device | null>(null)
   if (device !== prev) {
@@ -225,32 +250,33 @@ function RenameDialog({ device, onClose, onDone }: {
     if (!device) return
     try {
       await api.device(device.key, "rename", name)
-      toast.success(name.trim() ? `Renamed to ${name.trim()}` : `Back to ${device.original}`)
+      notify(name.trim() ? `Renamed to ${name.trim()}` : `Back to ${device.original}`)
       onDone()
       onClose()
     } catch (err) {
-      toast.error((err as Error).message)
+      notify((err as Error).message, "error")
     }
   }
 
   return (
-    <Dialog open={device !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <form onSubmit={save} className="grid gap-4">
-          <DialogHeader>
+    <Dialog open={device !== null} onOpenChange={(_, data) => !data.open && onClose()}>
+      <DialogSurface>
+        <form onSubmit={save}>
+          <DialogBody>
             <DialogTitle>Rename device</DialogTitle>
-            <DialogDescription>
-              Shown in the tooltip and notifications. Leave empty to use “{device?.original}”.
-            </DialogDescription>
-          </DialogHeader>
-          <Input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)}
-                 placeholder={device?.original} aria-label="Device name" />
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit">Save</Button>
-          </DialogFooter>
+            <DialogContent>
+              <Field label="Device name" hint={`Shown in the tooltip and notifications. Leave empty to use “${device?.original}”.`}>
+                <Input autoFocus value={name} maxLength={60} placeholder={device?.original}
+                       onChange={(_, data) => setName(data.value)} />
+              </Field>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={onClose}>Cancel</Button>
+              <Button type="submit" appearance="primary">Save</Button>
+            </DialogActions>
+          </DialogBody>
         </form>
-      </DialogContent>
+      </DialogSurface>
     </Dialog>
   )
 }

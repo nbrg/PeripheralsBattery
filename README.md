@@ -31,9 +31,10 @@ All thresholds can be changed in `settings.json`.
 - **Notifications**: low battery (once per discharge) and "fully charged, unplug it".
 - **Starts with Windows** (switched on at first launch; untick it in the menu).
 - **Remembers your devices**: a mouse that is off at boot still gets its grey icon.
-- **A modern settings window** built with React + [shadcn/ui](https://ui.shadcn.com): live
-  device cards, instant-save settings, colour thresholds with a live icon preview,
-  light/dark following Windows. It opens as a chromeless Edge app window and costs
+- **A modern settings window** built with React and Microsoft's
+  [Fluent UI](https://react.fluentui.dev) (the Windows 11 design system): live device
+  cards, instant-save settings, colour thresholds with a live icon preview, light/dark
+  following Windows. It opens as a chromeless Edge app window and costs
   nothing while closed.
 - **Learn a new device**: a wizard that listens to an unsupported USB dongle while
   you mute/unmute and plug/unplug it, finds the battery, mute and charging bytes,
@@ -147,7 +148,7 @@ sources (one per protocol)                 app core                 front end
 - `peribatt/web.py` — a local-only HTTP server (loopback, per-session token, Host check,
   strict CSP) that serves the settings UI and its JSON API; it starts when the window
   opens and stops ~45 s after it closes.
-- `web/` — the settings UI source: Vite + React + TypeScript + Tailwind + shadcn/ui. Its
+- `web/` — the settings UI source: Vite + React + TypeScript + Fluent UI v9. Its
   build is committed in `peribatt/webui/`, so running the app never needs Node.
 - `peribatt/prefs.py` / `peribatt/learn.py` — settings validation and the learn-wizard
   analysis, shared by the UI and the tests.

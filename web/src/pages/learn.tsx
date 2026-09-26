@@ -1,31 +1,41 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import {
-  BatteryMediumIcon,
-  CheckCircle2Icon,
-  CheckIcon,
-  CopyIcon,
-  MicOffIcon,
-  PlugIcon,
-  RefreshCwIcon,
-  SaveIcon,
-  SearchXIcon,
-  UsbIcon,
-} from "lucide-react"
-import { toast } from "sonner"
+  Badge,
+  Body1,
+  Button,
+  Caption1,
+  Card,
+  Dropdown,
+  Field,
+  Input,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Option,
+  ProgressBar,
+  Spinner,
+  Subtitle1,
+  Switch,
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from "@fluentui/react-components"
+import {
+  ArrowSyncRegular,
+  Battery5Regular,
+  CheckmarkRegular,
+  CopyRegular,
+  MicOffRegular,
+  PlugConnectedRegular,
+  SaveRegular,
+  SearchRegular,
+  UsbStickRegular,
+} from "@fluentui/react-icons"
 
-import { PageHeader } from "@/components/setting-row"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
+import { PageHeader } from "@/components/common"
+import { useNotify } from "@/components/notify"
 import { api, type Analysis, type Kind, type LearnDevice } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 const STEPS = ["Device", "Battery", "Mute", "Charging", "Save"] as const
 
@@ -34,12 +44,117 @@ const TICK_MS = new URLSearchParams(window.location.search).get("fast") ? 20 : 1
 
 type Phase = { phase: string; text: string; seconds: number }
 
+const useStyles = makeStyles({
+  steps: { display: "flex", alignItems: "center", gap: "8px", margin: "0 0 24px", padding: 0, listStyle: "none" },
+  step: { display: "flex", flex: 1, alignItems: "center", gap: "8px" },
+  dot: {
+    display: "grid",
+    placeItems: "center",
+    width: "28px",
+    height: "28px",
+    flexShrink: 0,
+    borderRadius: tokens.borderRadiusCircular,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+  },
+  dotDone: {
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    border: `1px solid ${tokens.colorBrandBackground}`,
+  },
+  dotNow: {
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    color: tokens.colorNeutralForeground1,
+    boxShadow: `0 0 0 4px ${tokens.colorBrandBackground2}`,
+  },
+  line: { flex: 1, height: "1px", backgroundColor: tokens.colorNeutralStroke2 },
+  muted: { color: tokens.colorNeutralForeground3 },
+  card: { padding: "24px", gap: "20px" },
+  cardHead: { display: "grid", gap: "4px" },
+  title: { display: "flex", alignItems: "center", gap: "8px", fontSize: "20px" },
+  body: { display: "grid", gap: "16px" },
+  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" },
+  list: { display: "grid", gap: "8px", maxHeight: "300px", overflowY: "auto", paddingRight: "4px" },
+  option: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    width: "100%",
+    padding: "12px",
+    textAlign: "left",
+    cursor: "pointer",
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusLarge,
+    transitionProperty: "background-color, border-color, box-shadow",
+    transitionDuration: tokens.durationFaster,
+    ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  optionSelected: {
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorBrandBackground2,
+    boxShadow: `0 0 0 1px ${tokens.colorBrandStroke1}`,
+    ":hover": { backgroundColor: tokens.colorBrandBackground2Hover },
+  },
+  optionText: { display: "grid", minWidth: 0, flex: 1 },
+  usb: { fontSize: "20px", color: tokens.colorNeutralForeground3 },
+  countdown: {
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  countdownRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between" },
+  pct: { position: "relative", maxWidth: "200px" },
+  inline: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" },
+  saveGrid: { display: "grid", gridTemplateColumns: "1fr 200px", gap: "16px" },
+  pre: {
+    margin: 0,
+    maxHeight: "220px",
+    overflow: "auto",
+    padding: "12px 14px",
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground3,
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: "1.6",
+  },
+  code: { fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200 },
+})
+
+function StepCard({ icon, title, description, children, footer }: {
+  icon?: ReactNode
+  title: string
+  description: string
+  children?: ReactNode
+  footer: ReactNode
+}) {
+  const s = useStyles()
+  return (
+    <Card className={s.card}>
+      <div className={s.cardHead}>
+        <Subtitle1 as="h2" className={s.title} style={{ margin: 0 }}>{icon}{title}</Subtitle1>
+        <Body1 className={s.muted}>{description}</Body1>
+      </div>
+      {children && <div className={s.body}>{children}</div>}
+      <div className={s.footer}>{footer}</div>
+    </Card>
+  )
+}
+
 /** Runs timed phases, telling the app which one is active so reports get labelled. */
 function usePhases() {
   const [current, setCurrent] = useState<{ text: string; left: number } | null>(null)
   const [progress, setProgress] = useState(0)
   const cancelled = useRef(false)
-  useEffect(() => () => { cancelled.current = true }, [])
+  useEffect(() => {
+    cancelled.current = false
+    return () => { cancelled.current = true }
+  }, [])
 
   async function run(phases: Phase[]) {
     const total = phases.reduce((n, p) => n + p.seconds, 0)
@@ -49,19 +164,20 @@ function usePhases() {
       for (let left = p.seconds; left > 0; left--) {
         if (cancelled.current) return
         setCurrent({ text: p.text, left })
-        setProgress((100 * elapsed) / total)
+        setProgress(elapsed / total)
         await new Promise((r) => setTimeout(r, TICK_MS))
         elapsed++
       }
     }
     await api.learn.phase("idle")
-    setProgress(100)
+    setProgress(1)
     setCurrent(null)
   }
   return { current, progress, run }
 }
 
 export function LearnPage() {
+  const s = useStyles()
   const [step, setStep] = useState(0)
   const [device, setDevice] = useState<LearnDevice | null>(null)
   const [results, setResults] = useState<Partial<Record<"level" | "muted" | "charging", Analysis>>>({})
@@ -79,18 +195,14 @@ export function LearnPage() {
     <>
       <PageHeader title="Learn a new device"
                   description="Teach the app a USB dongle it doesn't know yet. Takes about a minute." />
-      <ol className="mb-6 flex items-center gap-2" aria-label="Progress">
+      <ol className={s.steps} aria-label="Progress">
         {STEPS.map((label, i) => (
-          <li key={label} className="flex flex-1 items-center gap-2">
-            <span className={cn(
-              "grid size-7 shrink-0 place-items-center rounded-full border text-xs font-medium transition-colors",
-              i < step && "bg-primary text-primary-foreground border-primary",
-              i === step && "border-primary text-foreground ring-primary/20 ring-4",
-              i > step && "text-muted-foreground")}>
-              {i < step ? <CheckIcon className="size-3.5" /> : i + 1}
+          <li key={label} className={s.step}>
+            <span className={mergeClasses(s.dot, i < step && s.dotDone, i === step && s.dotNow)}>
+              {i < step ? <CheckmarkRegular /> : i + 1}
             </span>
-            <span className={cn("text-sm", i === step ? "font-medium" : "text-muted-foreground")}>{label}</span>
-            {i < STEPS.length - 1 && <span className="bg-border h-px flex-1" />}
+            <Text weight={i === step ? "semibold" : "regular"} className={i === step ? undefined : s.muted}>{label}</Text>
+            {i < STEPS.length - 1 && <span className={s.line} />}
           </li>
         ))}
       </ol>
@@ -98,7 +210,7 @@ export function LearnPage() {
       {step === 0 && <PickStep onPicked={(d) => { setDevice(d); setStep(1) }} />}
       {step === 1 && <BatteryStep onDone={(r) => { if (r) setResults((x) => ({ ...x, level: r })); setStep(2) }} />}
       {step === 2 && (
-        <ToggleStep what="muted" icon={<MicOffIcon />} title="Microphone mute"
+        <ToggleStep what="muted" icon={<MicOffRegular />} title="Microphone mute"
                     description="For headsets: follow the prompts to unmute, mute and unmute the mic."
                     phases={[
                       { phase: "unmuted", text: "Make sure the mic is unmuted", seconds: 5 },
@@ -108,7 +220,7 @@ export function LearnPage() {
                     onDone={(r) => { if (r) setResults((x) => ({ ...x, muted: r })); setStep(3) }} />
       )}
       {step === 3 && (
-        <ToggleStep what="charging" icon={<PlugIcon />} title="Charging"
+        <ToggleStep what="charging" icon={<PlugConnectedRegular />} title="Charging"
                     description="Unplug and plug in the charging cable when asked. Skip it if the device charges over its data cable."
                     phases={[
                       { phase: "unplugged", text: "Unplug the charging cable", seconds: 8 },
@@ -124,21 +236,23 @@ export function LearnPage() {
 }
 
 function PickStep({ onPicked }: { onPicked: (d: LearnDevice) => void }) {
+  const s = useStyles()
+  const notify = useNotify()
   const [all, setAll] = useState(false)
   const [devices, setDevices] = useState<LearnDevice[] | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [opening, setOpening] = useState(false)
 
-  async function load() {
+  async function load(showAll = all) {
     setDevices(null)
     try {
-      setDevices(await api.learn.devices(all))
+      setDevices(await api.learn.devices(showAll))
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
       setDevices([])
     }
   }
-  useEffect(() => { load() }, [all])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(all) }, [all])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function next() {
     const d = devices?.find((x) => x.id === selected)
@@ -149,81 +263,76 @@ function PickStep({ onPicked }: { onPicked: (d: LearnDevice) => void }) {
       if (!res.ok) throw new Error("Couldn't open this device. Close its vendor app and try again.")
       onPicked(d)
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
     } finally {
       setOpening(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Which device?</CardTitle>
-        <CardDescription>Plug in its dongle and switch it on. Devices the app already reads are hidden.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <div className="grid max-h-72 gap-2 overflow-y-auto pr-1" role="listbox" aria-label="USB devices">
-          {devices === null && <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm"><Spinner /> Looking…</div>}
-          {devices?.length === 0 && (
-            <p className="text-muted-foreground p-4 text-sm">No unsupported USB devices found. Is the dongle plugged in?</p>
-          )}
-          {devices?.map((d) => (
-            <button key={d.id} role="option" aria-selected={selected === d.id} onClick={() => setSelected(d.id)}
-                    className={cn("hover:bg-accent flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-                                  selected === d.id && "border-primary bg-accent ring-primary/15 ring-2")}>
-              <UsbIcon className="text-muted-foreground size-5 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{d.name}</div>
-                <div className="text-muted-foreground text-xs">{d.maker || "Unknown maker"} · {d.vid}:{d.pid}</div>
-              </div>
-              {d.supported && <Badge variant="secondary">Supported</Badge>}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch id="all" checked={all} onCheckedChange={setAll} />
-          <Label htmlFor="all" className="text-muted-foreground font-normal">Show devices that are already supported</Label>
-        </div>
-      </CardContent>
-      <CardFooter className="justify-between">
-        <Button variant="ghost" onClick={load}><RefreshCwIcon /> Refresh</Button>
-        <Button onClick={next} disabled={selected === null || opening}>{opening && <Spinner />} Next</Button>
-      </CardFooter>
-    </Card>
+    <StepCard title="Which device?"
+              description="Plug in its dongle and switch it on. Devices the app already reads are hidden."
+              footer={<>
+                <Button appearance="subtle" icon={<ArrowSyncRegular />} onClick={() => load()}>Refresh</Button>
+                <Button appearance="primary" disabled={selected === null || opening} onClick={next}
+                        icon={opening ? <Spinner size="tiny" /> : undefined}>Next</Button>
+              </>}>
+      <div className={s.list} role="listbox" aria-label="USB devices">
+        {devices === null && <Spinner size="small" label="Looking for devices…" labelPosition="after" />}
+        {devices?.length === 0 && (
+          <Body1 className={s.muted}>No unsupported USB devices found. Is the dongle plugged in?</Body1>
+        )}
+        {devices?.map((d) => (
+          <button key={d.id} role="option" aria-selected={selected === d.id} onClick={() => setSelected(d.id)}
+                  className={mergeClasses(s.option, selected === d.id && s.optionSelected)}>
+            <UsbStickRegular className={s.usb} />
+            <span className={s.optionText}>
+              <Text weight="semibold" truncate wrap={false}>{d.name}</Text>
+              <Caption1 className={s.muted}>{d.maker || "Unknown maker"} · {d.vid}:{d.pid}</Caption1>
+            </span>
+            {d.supported && <Badge appearance="tint" color="informative">Supported</Badge>}
+          </button>
+        ))}
+      </div>
+      <Switch checked={all} onChange={(_, data) => setAll(data.checked)} label="Show devices that are already supported" />
+    </StepCard>
   )
 }
 
 function Countdown({ current, progress }: { current: { text: string; left: number } | null; progress: number }) {
+  const s = useStyles()
   return (
-    <div className="bg-muted/50 grid gap-3 rounded-xl p-4">
-      <div className="flex items-baseline justify-between">
-        <span className="text-lg font-medium">{current?.text ?? "Done"}</span>
-        {current && <span className="text-muted-foreground tabular-nums">{current.left}s</span>}
+    <div className={s.countdown}>
+      <div className={s.countdownRow}>
+        <Text size={400} weight="semibold">{current?.text ?? "Done"}</Text>
+        {current && <Text className={s.muted}>{current.left}s</Text>}
       </div>
-      <Progress value={progress} />
+      <ProgressBar value={progress} thickness="large" shape="rounded" />
     </div>
   )
 }
 
 function Result({ r, what }: { r: Analysis; what: string }) {
   return r.found ? (
-    <Alert className="border-battery-charging/40">
-      <CheckCircle2Icon className="text-battery-charging" />
-      <AlertTitle>Found the {what}</AlertTitle>
-      <AlertDescription>{r.description} · {r.reports} reports heard</AlertDescription>
-    </Alert>
+    <MessageBar intent="success">
+      <MessageBarBody>
+        <MessageBarTitle>Found the {what}</MessageBarTitle>
+        {r.description} · {r.reports} reports heard
+      </MessageBarBody>
+    </MessageBar>
   ) : (
-    <Alert>
-      <SearchXIcon />
-      <AlertTitle>No {what} signal found</AlertTitle>
-      <AlertDescription>
-        Heard {r.reports} reports, none matched. You can try again or skip this step.
-      </AlertDescription>
-    </Alert>
+    <MessageBar intent="warning">
+      <MessageBarBody>
+        <MessageBarTitle>No {what} signal found</MessageBarTitle>
+        Heard {r.reports} reports, none matched. Try again or skip this step.
+      </MessageBarBody>
+    </MessageBar>
   )
 }
 
 function BatteryStep({ onDone }: { onDone: (r: Analysis | null) => void }) {
+  const s = useStyles()
+  const notify = useNotify()
   const [level, setLevel] = useState("")
   const [probe, setProbe] = useState(true)
   const [running, setRunning] = useState(false)
@@ -240,54 +349,45 @@ function BatteryStep({ onDone }: { onDone: (r: Analysis | null) => void }) {
       const pct = Number.parseInt(level, 10)
       setResult(await api.learn.analyze("level", Number.isNaN(pct) ? undefined : pct))
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
     } finally {
       setRunning(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><BatteryMediumIcon className="size-5" /> Battery level</CardTitle>
-        <CardDescription>
-          Enter the level the device reports right now (from its app, a voice prompt or its LEDs), then listen.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        <div className="grid max-w-48 gap-2">
-          <Label htmlFor="level">Battery now</Label>
-          <div className="relative">
-            <Input id="level" inputMode="numeric" value={level} onChange={(e) => setLevel(e.target.value)}
-                   placeholder="e.g. 57" className="pr-8" />
-            <span className="text-muted-foreground absolute top-1/2 right-3 -translate-y-1/2 text-sm">%</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch id="probe" checked={probe} onCheckedChange={setProbe} />
-          <Label htmlFor="probe" className="font-normal">Also ask the battery questions other brands understand (read-only)</Label>
-        </div>
-        {(running || result) && <Countdown current={phases.current} progress={phases.progress} />}
-        {result && <Result r={result} what="battery level" />}
-      </CardContent>
-      <CardFooter className="justify-between">
-        <Button variant="ghost" onClick={() => onDone(null)} disabled={running}>Skip</Button>
-        {result?.found
-          ? <Button onClick={() => onDone(result)}>Next</Button>
-          : <Button onClick={listen} disabled={running}>{running && <Spinner />} {result ? "Listen again" : "Listen"}</Button>}
-      </CardFooter>
-    </Card>
+    <StepCard icon={<Battery5Regular />} title="Battery level"
+              description="Enter the level the device reports right now (from its app, a voice prompt or its LEDs), then listen."
+              footer={<>
+                <Button appearance="subtle" disabled={running} onClick={() => onDone(null)}>Skip</Button>
+                {result?.found
+                  ? <Button appearance="primary" onClick={() => onDone(result)}>Next</Button>
+                  : <Button appearance="primary" disabled={running} onClick={listen}
+                            icon={running ? <Spinner size="tiny" /> : undefined}>
+                      {result ? "Listen again" : "Listen"}
+                    </Button>}
+              </>}>
+      <Field label="Battery now" className={s.pct}>
+        <Input inputMode="numeric" value={level} placeholder="e.g. 57" contentAfter={<Text className={s.muted}>%</Text>}
+               onChange={(_, d) => setLevel(d.value)} />
+      </Field>
+      <Switch checked={probe} onChange={(_, d) => setProbe(d.checked)}
+              label="Also ask the battery questions other brands understand (read-only)" />
+      {(running || result) && <Countdown current={phases.current} progress={phases.progress} />}
+      {result && <Result r={result} what="battery level" />}
+    </StepCard>
   )
 }
 
 function ToggleStep({ what, icon, title, description, phases: plan, onDone }: {
   what: "muted" | "charging"
-  icon: React.ReactNode
+  icon: ReactNode
   title: string
   description: string
   phases: Phase[]
   onDone: (r: Analysis | null) => void
 }) {
+  const notify = useNotify()
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<Analysis | null>(null)
   const phases = usePhases()
@@ -299,37 +399,39 @@ function ToggleStep({ what, icon, title, description, phases: plan, onDone }: {
       await phases.run(plan)
       setResult(await api.learn.analyze(what))
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
     } finally {
       setRunning(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 [&_svg]:size-5">{icon} {title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        {(running || result) && <Countdown current={phases.current} progress={phases.progress} />}
-        {result && <Result r={result} what={what === "muted" ? "mute signal" : "charging signal"} />}
-      </CardContent>
-      <CardFooter className="justify-between">
-        <Button variant="ghost" onClick={() => onDone(null)} disabled={running}>Skip</Button>
-        {result?.found
-          ? <Button onClick={() => onDone(result)}>Next</Button>
-          : <Button onClick={start} disabled={running}>{running && <Spinner />} {result ? "Try again" : "Start"}</Button>}
-      </CardFooter>
-    </Card>
+    <StepCard icon={icon} title={title} description={description}
+              footer={<>
+                <Button appearance="subtle" disabled={running} onClick={() => onDone(null)}>Skip</Button>
+                {result?.found
+                  ? <Button appearance="primary" onClick={() => onDone(result)}>Next</Button>
+                  : <Button appearance="primary" disabled={running} onClick={start}
+                            icon={running ? <Spinner size="tiny" /> : undefined}>
+                      {result ? "Try again" : "Start"}
+                    </Button>}
+              </>}>
+      {(running || result) && <Countdown current={phases.current} progress={phases.progress} />}
+      {result && <Result r={result} what={what === "muted" ? "mute signal" : "charging signal"} />}
+    </StepCard>
   )
 }
+
+const KIND_OPTIONS: Kind[] = ["headset", "mouse", "keyboard", "gamepad", "device"]
+const cap = (k: string) => k[0].toUpperCase() + k.slice(1)
 
 function SaveStep({ device, results, onRestart }: {
   device: LearnDevice
   results: Partial<Record<string, Analysis>>
   onRestart: () => void
 }) {
+  const s = useStyles()
+  const notify = useNotify()
   const [name, setName] = useState(device.name)
   const [kind, setKind] = useState<Kind>(results.muted?.found ? "headset" : "device")
   const [recipe, setRecipe] = useState("")
@@ -346,84 +448,71 @@ function SaveStep({ device, results, onRestart }: {
     try {
       const r = await api.learn.save(name, kind)
       setSaved(r.path)
-      toast.success(`${name} learned — its icon appears within a few seconds`)
+      notify(`${name} learned`, "success", "Its icon appears in the tray within a few seconds.")
     } catch (e) {
-      toast.error((e as Error).message)
+      notify((e as Error).message, "error")
     }
   }
 
   async function copy() {
     await navigator.clipboard.writeText(recipe)
-    toast.success("Recipe copied — share it with a friend who has the same device")
+    notify("Recipe copied", "success", "Share it with a friend who has the same device.")
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Name and save</CardTitle>
-        <CardDescription>This becomes a recipe. Share it and anyone with the same device gets support.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        <div className="flex flex-wrap gap-2">
-          {(["level", "muted", "charging"] as const).map((k) => (
-            <Badge key={k} variant={results[k]?.found ? "default" : "outline"}>
-              {results[k]?.found ? <CheckIcon /> : null}
-              {{ level: "Battery", muted: "Mic mute", charging: "Charging" }[k]}
-            </Badge>
-          ))}
-        </div>
-        <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
-          <div className="grid gap-2">
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="kind">Type</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as Kind)}>
-              <SelectTrigger id="kind" className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(["headset", "mouse", "keyboard", "gamepad", "device"] as Kind[]).map((k) => (
-                  <SelectItem key={k} value={k}>{k[0].toUpperCase() + k.slice(1)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <pre className="bg-muted/60 max-h-56 overflow-auto rounded-lg p-3 font-mono text-xs leading-relaxed"
-             data-testid="recipe">{recipe}</pre>
-        {saved && (
-          <Alert className="border-battery-charging/40">
-            <CheckCircle2Icon className="text-battery-charging" />
-            <AlertTitle>Saved</AlertTitle>
-            <AlertDescription className="break-all">{saved}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-      <CardFooter className="justify-between">
-        <Button variant="ghost" onClick={onRestart}>Learn another</Button>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={copy} disabled={!recipe}><CopyIcon /> Copy</Button>
-          <Button onClick={save} disabled={!recipe || saved !== null}><SaveIcon /> Save</Button>
-        </div>
-      </CardFooter>
-    </Card>
+    <StepCard title="Name and save"
+              description="This becomes a recipe. Share it and anyone with the same device gets support."
+              footer={<>
+                <Button appearance="subtle" onClick={onRestart}>Learn another</Button>
+                <span className={s.inline}>
+                  <Button icon={<CopyRegular />} disabled={!recipe} onClick={copy}>Copy</Button>
+                  <Button appearance="primary" icon={<SaveRegular />} disabled={!recipe || saved !== null}
+                          onClick={save}>Save</Button>
+                </span>
+              </>}>
+      <div className={s.inline}>
+        {(["level", "muted", "charging"] as const).map((k) => (
+          <Badge key={k} appearance={results[k]?.found ? "filled" : "outline"}
+                 color={results[k]?.found ? "brand" : "subtle"}
+                 icon={results[k]?.found ? <CheckmarkRegular /> : undefined}>
+            {{ level: "Battery", muted: "Mic mute", charging: "Charging" }[k]}
+          </Badge>
+        ))}
+      </div>
+      <div className={s.saveGrid}>
+        <Field label="Name">
+          <Input value={name} onChange={(_, d) => setName(d.value)} />
+        </Field>
+        <Field label="Type">
+          <Dropdown value={cap(kind)} selectedOptions={[kind]}
+                    onOptionSelect={(_, d) => d.optionValue && setKind(d.optionValue as Kind)}>
+            {KIND_OPTIONS.map((k) => <Option key={k} value={k}>{cap(k)}</Option>)}
+          </Dropdown>
+        </Field>
+      </div>
+      <pre className={s.pre} data-testid="recipe">{recipe}</pre>
+      {saved && (
+        <MessageBar intent="success">
+          <MessageBarBody>
+            <MessageBarTitle>Saved</MessageBarTitle>
+            <span className={s.code}>{saved}</span>
+          </MessageBarBody>
+        </MessageBar>
+      )}
+    </StepCard>
   )
 }
 
 function NothingFound({ onRestart }: { onRestart: () => void }) {
+  const s = useStyles()
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><SearchXIcon className="size-5" /> Nothing recognised</CardTitle>
-        <CardDescription>
-          None of the steps found a usable signal. This device probably needs commands only its vendor app knows.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="text-muted-foreground text-sm">
-        Run <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">PeripheralsBattery.exe --probe</code> and
-        share the report in an issue on GitHub to get it supported.
-      </CardContent>
-      <CardFooter><Button variant="outline" onClick={onRestart}>Start over</Button></CardFooter>
-    </Card>
+    <StepCard icon={<SearchRegular />} title="Nothing recognised"
+              description="None of the steps found a usable signal. This device probably needs commands only its vendor app knows."
+              footer={<Button onClick={onRestart}>Start over</Button>}>
+      <Body1 className={s.muted}>
+        Run <code className={s.code}>PeripheralsBattery.exe --probe</code> and share the report in an issue on
+        GitHub to get it supported.
+      </Body1>
+    </StepCard>
   )
 }

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   web:
-    # The settings UI (React + shadcn/ui) is committed pre-built in peribatt/webui so
+    # The settings UI (React + Fluent UI) is committed pre-built in peribatt/webui so
     # the app runs without Node; this checks that build matches its source.
     runs-on: ubuntu-latest
     steps:
