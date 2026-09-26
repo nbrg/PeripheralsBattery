@@ -1,0 +1,140 @@
+from peribatt import hyperx
+from peribatt.hyperx import (
+    CMD_BATTERY,
+    CMD_CHARGE,
+    CMD_STATUS,
+    MISSED_POLLS_OFFLINE,
+    HyperXSource,
+    decode,
+    packet,
+)
+from peribatt.model import HEADSET
+
+from .fakes import FakeApi, QueueHandle
+
+
+def reply(cmd, b4=0, b7=0):
+    r = [0x0B, 0x00, 0xBB, cmd, b4, 0, 0, b7]
+    return r + [0] * (64 - len(r))
+
+
+def test_packet_layout():
+    p = packet(CMD_BATTERY)
+    assert len(p) == 62
+    assert p[:16] == bytes.fromhex("06 00 02 00 9a 00 00 68 4a 8e 0a 00 00 00 bb 02")
+    assert p[14:16] == b"\xbb\x02" and not any(p[17:])
+
+
+def test_decode_known_replies():
+    assert decode(reply(CMD_BATTERY, b7=73)) == {"online": True, "level": 73}
+    assert decode(reply(CMD_CHARGE, b4=1)) == {"charging": True}
+    assert decode(reply(CMD_CHARGE, b4=2)) == {"charging": True}      # full, still plugged
+    assert decode(reply(CMD_CHARGE, b4=0)) == {"charging": False}
+    assert decode(reply(0x08, b4=1)) == {"muted": True}
+    assert decode(reply(0x08, b4=0)) == {"muted": False}
+    assert decode(reply(CMD_STATUS, b4=1)) == {"online": True}
+    assert decode(reply(CMD_STATUS, b4=4)) == {"online": True}
+    assert decode(reply(CMD_STATUS, b4=2)) == {"online": False}       # pairing
+
+
+def test_decode_rejects_junk():
+    assert decode([]) == {}
+    assert decode(reply(CMD_BATTERY, b7=200)) == {}
+    assert decode([0x06] + reply(CMD_BATTERY, b7=50)[1:]) == {}       # wrong report id
+    assert decode(reply(0x11, b4=1)) == {}                            # firmware version etc.
+
+
+def dongle(pid=0x16EA):
+    api = FakeApi()
+    h = QueueHandle()
+    api.add(0x0951, pid, b"vendor", h, usage_page=0xFF13, usage=1)
+    api.add(0x0951, pid, b"consumer", QueueHandle(), usage_page=0x0C, usage=1)
+    return api, h
+
+
+def test_poll_opens_vendor_collection_and_asks_for_everything():
+    api, h = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    [r] = src.poll()
+    assert api.opened == [b"vendor"]
+    assert [w[15] for w in h.written] == [CMD_STATUS, CMD_BATTERY, CMD_CHARGE]
+    assert r.name == "HyperX Cloud Flight S" and r.kind == HEADSET and not r.online
+
+
+def test_replies_update_state_and_notify():
+    api, h = dongle()
+    seen = []
+    src = HyperXSource(api=api, on_change=seen.append, threaded=False)
+    src.poll()
+    for rep in (reply(CMD_STATUS, 1), reply(CMD_BATTERY, b7=64), reply(CMD_CHARGE, 1)):
+        src.feed(rep)
+    r = src.readings()[0]
+    assert (r.online, r.level, r.charging, r.muted) == (True, 64, True, False)
+    src.feed(reply(0x08, b4=1))
+    assert seen[-1].muted
+    n = len(seen)
+    src.feed(reply(0x08, b4=1))          # no change -> no callback
+    assert len(seen) == n
+
+
+def test_power_on_triggers_battery_query():
+    api, h = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    h.written.clear()
+    src.feed(reply(CMD_STATUS, 1))
+    assert [w[15] for w in h.written] == [CMD_BATTERY, CMD_CHARGE]
+
+
+def test_goes_offline_after_missed_polls_and_back():
+    api, h = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    src.feed(reply(CMD_BATTERY, b7=50))
+    for _ in range(MISSED_POLLS_OFFLINE + 1):
+        r = src.poll()[0]
+    assert not r.online and r.note == "switched off" and r.level == 50
+    src.feed(reply(CMD_BATTERY, b7=49))
+    assert src.readings()[0].online
+
+
+def test_muted_is_not_reported_while_off():
+    api, _ = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    src.feed(reply(0x08, b4=1))
+    src.feed(reply(CMD_STATUS, 0))
+    assert not src.readings()[0].muted
+
+
+def test_unplugged_dongle():
+    api, h = dongle()
+    seen = []
+    src = HyperXSource(api=api, on_change=seen.append, threaded=False)
+    src.poll()
+    src._lost()
+    assert h.closed and seen[-1].note == "dongle unplugged"
+    assert src.readings()[0].online is False
+
+
+def test_nothing_reported_before_the_dongle_was_ever_seen():
+    assert HyperXSource(api=FakeApi(), threaded=False).poll() == []
+
+
+def test_cloud_ii_wireless_uses_its_own_name():
+    api, _ = dongle(pid=0x1718)
+    [r] = HyperXSource(api=api, threaded=False).poll()
+    assert r.name == "HyperX Cloud II Wireless" and r.key == "hyperx-1718"
+
+
+def test_reader_thread_feeds_reports():
+    import threading
+
+    api, h = dongle()
+    got = threading.Event()
+    src = HyperXSource(api=api, on_change=lambda r: got.set() if r.level == 81 else None)
+    h.inbox.append(reply(CMD_BATTERY, b7=81))
+    src.poll()
+    assert got.wait(2)
+    src.close()
+    assert hyperx.VENDOR_PAGE == 0xFF13

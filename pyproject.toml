@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "peripherals-battery"
+dynamic = ["version"]
+description = "A tiny Windows tray app showing the battery of your wireless mouse, headset and controllers."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["hidapi>=0.14", "pystray>=0.19", "Pillow>=10.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+peribatt = "peribatt.__main__:main"
+
+[tool.setuptools]
+packages = ["peribatt"]
+
+[tool.setuptools.package-data]
+peribatt = ["recipes.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "peribatt.__version__" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,115 @@
+[
+  {
+    "name": "SteelSeries Arctis Nova 7",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x2202", "0x2206", "0x220a", "0x223a", "0x227a", "0x22a4"],
+    "match": {"usage_page": "0xffc0"},
+    "steps": [
+      {"write": "00 b0", "read_len": 64,
+       "level": {"byte": 2, "max": 4},
+       "charging": {"byte": 3, "in": [1, 2]},
+       "offline": {"byte": 3, "in": [0]}}
+    ]
+  },
+  {
+    "name": "SteelSeries Arctis Nova 7",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x22a1", "0x227e", "0x2258", "0x229e", "0x22ad", "0x22a9", "0x22a5"],
+    "match": {"usage_page": "0xffc0"},
+    "steps": [
+      {"write": "00 b0", "read_len": 64,
+       "level": {"byte": 2},
+       "charging": {"byte": 3, "in": [1, 2]},
+       "offline": {"byte": 3, "in": [0]}}
+    ]
+  },
+  {
+    "name": "SteelSeries Arctis Nova 5",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x2232", "0x2253"],
+    "match": {"usage_page": "0xffc0"},
+    "steps": [
+      {"write": "00 b0", "read_len": 64,
+       "level": {"byte": 3},
+       "charging": {"byte": 4, "in": [1]},
+       "offline": {"byte": 1, "in": [2]}}
+    ]
+  },
+  {
+    "name": "SteelSeries Arctis 7",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x1260", "0x12ad", "0x1252", "0x1280"],
+    "match": {"interface": 5},
+    "steps": [
+      {"write": "06 18", "read_len": 8, "level": {"byte": 2}}
+    ]
+  },
+  {
+    "name": "SteelSeries Arctis 1 / 7X / 7P",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x12b3", "0x12b6", "0x12d7", "0x12d5"],
+    "match": {"interface": 3},
+    "steps": [
+      {"write": "06 12", "read_len": 8,
+       "level": {"byte": 3},
+       "offline": {"byte": 2, "in": [1]}}
+    ]
+  },
+  {
+    "name": "SteelSeries Arctis 9",
+    "kind": "headset",
+    "vendor_id": "0x1038",
+    "product_ids": ["0x12c2"],
+    "match": {"interface": 0},
+    "steps": [
+      {"write": "00 20", "read_len": 12,
+       "level": {"byte": 3, "min": 100, "max": 154},
+       "charging": {"byte": 4, "in": [1]}}
+    ]
+  },
+  {
+    "name": "Corsair Void",
+    "kind": "headset",
+    "vendor_id": "0x1b1c",
+    "product_ids": ["0x1b1c", "0x1b27", "0x0a14", "0x0a16", "0x0a17", "0x0a1d", "0x0a1a",
+                    "0x1b2a", "0x1b23", "0x1b29", "0x0a55", "0x0a51", "0x0a52", "0x0a38",
+                    "0x0a4f", "0x0a2b", "0x0a75", "0x0a56"],
+    "match": {"usage_page": "0xffc5"},
+    "steps": [
+      {"write": "c9 64", "read_len": 5,
+       "level": {"byte": 2, "mask": "0x7f"},
+       "charging": {"byte": 4, "in": [4, 5]},
+       "offline": {"byte": 4, "in": [0]}}
+    ]
+  },
+  {
+    "name": "HyperX Cloud II Wireless",
+    "kind": "headset",
+    "vendor_id": "0x03f0",
+    "product_ids": ["0x0696", "0x018b"],
+    "match": {"usage_page": "0xff90", "usage": "0x0303"},
+    "steps": [
+      {"write": "06 ff bb 02", "pad_to": 52, "expect": "06 ff bb 02", "read_len": 20,
+       "level": {"byte": 7}},
+      {"write": "06 ff bb 03", "pad_to": 52, "expect": "06 ff bb 03", "read_len": 20,
+       "charging": {"byte": 4, "in": [1]}}
+    ]
+  },
+  {
+    "name": "HyperX Cloud Alpha Wireless",
+    "kind": "headset",
+    "vendor_id": "0x03f0",
+    "product_ids": ["0x098d"],
+    "steps": [
+      {"write": "21 bb 0b", "pad_to": 31, "expect": "21 bb", "read_len": 31,
+       "level": {"byte": 3}},
+      {"write": "21 bb 0c", "pad_to": 31, "expect": "21 bb", "read_len": 31,
+       "charging": {"byte": 3, "in": [1]}}
+    ]
+  }
+]

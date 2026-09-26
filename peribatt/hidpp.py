@@ -1,0 +1,320 @@
+"""Logitech mice over HID++ 2.0 - e.g. the G PRO Wireless on its LIGHTSPEED
+receiver (046D:C539) or on its USB cable (046D:C088).
+
+Wire format (long report, 20 bytes, on the vendor collection FF00:0002):
+
+    11 <device index> <feature index> <function << 4 | software id> <params...>
+
+* device index: 1..6 behind a receiver, 0xFF for a device on its cable.
+* feature index 0 is the root feature; its function 0 turns a feature *id*
+  into the per-device feature *index* used for every other call.
+* Errors: the receiver answers ``10 <idx> 8F <feat> <fn> <code>`` (HID++ 1.0,
+  short report) - code 0x08 means "no device paired in that slot", 0x09 means
+  "paired but unreachable" (switched off / asleep). The device itself answers
+  ``11 <idx> FF <feat> <fn> <code>`` (HID++ 2.0).
+
+Battery features, the first one a device offers is used:
+
+    0x1004 unified battery, fn 1: <percent> <level flags> <charge status> <ext power>
+    0x1000 battery status,  fn 0: <percent> <next level> <status>
+    0x1001 battery voltage, fn 0: <mV hi> <mV lo> <flags, bit 7 = external power>
+
+The G PRO Wireless reports *voltage*, so the percentage is estimated from a
+Li-ion discharge curve.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import time
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from .hidio import HidApi, hexdump
+from .model import DEVICE, KEYBOARD, MOUSE, Reading
+
+log = logging.getLogger("peribatt")
+
+LOGITECH_VID = 0x046D
+VENDOR_PAGE = 0xFF00
+USAGE_SHORT, USAGE_LONG = 0x0001, 0x0002
+
+SHORT, LONG = 0x10, 0x11
+LONG_LEN = 20
+SW_ID = 0x0B
+WIRED = 0xFF
+RECEIVER_SLOTS = range(1, 7)
+
+ERR_V1, ERR_V2 = 0x8F, 0xFF
+ERR_UNKNOWN_DEVICE = 0x08
+
+F_ROOT = 0x0000
+F_DEVICE_INFO = 0x0003
+F_NAME = 0x0005
+F_UNIFIED = 0x1004
+F_STATUS = 0x1000
+F_VOLTAGE = 0x1001
+BATTERY_FEATURES = (F_UNIFIED, F_STATUS, F_VOLTAGE)
+
+# Unifying / Bolt / LIGHTSPEED receivers. Anything else with a HID++ collection
+# is treated as a device on its own cable.
+RECEIVERS = {0xC52B, 0xC52F, 0xC531, 0xC532, 0xC534, 0xC539, 0xC53A, 0xC53D,
+             0xC53F, 0xC541, 0xC545, 0xC547, 0xC548, 0xC54D}
+
+# 0x0005 function 2 device type
+_TYPES = {0: KEYBOARD, 2: KEYBOARD, 3: MOUSE, 4: MOUSE, 5: MOUSE}
+
+# Typical single-cell Li-ion curve (mV, %), the same points Solaar uses.
+VOLTAGE_CURVE: Tuple[Tuple[int, int], ...] = (
+    (4186, 100), (4067, 90), (3989, 80), (3922, 70), (3859, 60), (3811, 50),
+    (3778, 40), (3751, 30), (3717, 20), (3671, 10), (3646, 5), (3579, 2), (3500, 0))
+
+
+class HidppError(Exception):
+    def __init__(self, code: int, legacy: bool):
+        super().__init__(f"HID++{' 1.0' if legacy else ' 2.0'} error 0x{code:02x}")
+        self.code = code
+        self.legacy = legacy
+
+
+def build_request(index: int, feature_index: int, function: int,
+                  params: Sequence[int] = ()) -> List[int]:
+    msg = [LONG, index, feature_index, ((function & 0x0F) << 4) | SW_ID, *params]
+    if len(msg) > LONG_LEN:
+        raise ValueError("too many parameters for a long report")
+    return msg + [0] * (LONG_LEN - len(msg))
+
+
+def match_reply(report: Sequence[int], index: int, feature_index: int,
+                function: int) -> Optional[List[int]]:
+    """Params of ``report`` when it answers our request, ``None`` when it is
+    unrelated traffic, and :class:`HidppError` when it is an error reply."""
+    if len(report) < 5 or report[1] != index:
+        return None
+    fn = ((function & 0x0F) << 4) | SW_ID
+    if report[2] in (ERR_V1, ERR_V2) and report[3] == feature_index and report[4] == fn:
+        code = report[5] if len(report) > 5 else 0
+        raise HidppError(code, legacy=report[2] == ERR_V1)
+    if report[0] == LONG and report[2] == feature_index and report[3] == fn:
+        params = list(report[4:])
+        return params + [0] * (16 - len(params))
+    return None
+
+
+def voltage_to_percent(mv: int) -> int:
+    if mv >= VOLTAGE_CURVE[0][0]:
+        return 100
+    for (v_hi, p_hi), (v_lo, p_lo) in zip(VOLTAGE_CURVE, VOLTAGE_CURVE[1:], strict=False):
+        if mv >= v_lo:
+            return round(p_lo + (mv - v_lo) * (p_hi - p_lo) / (v_hi - v_lo))
+    return 0
+
+
+def battery_function(feature: int) -> int:
+    return 1 if feature == F_UNIFIED else 0
+
+
+def decode_battery(feature: int, p: Sequence[int]) -> Tuple[Optional[int], bool]:
+    """(percent or None, on external power) from a battery reply.
+    A full battery that is still plugged in counts as charging (green frame)."""
+    if feature == F_UNIFIED:
+        level = p[0] if 0 < p[0] <= 100 else _approx_from_flags(p[1])
+        return level, p[2] in (1, 2, 3)
+    if feature == F_STATUS:
+        level = p[0] if 0 < p[0] <= 100 else None
+        return level, p[2] in (1, 2, 3, 4)
+    if feature == F_VOLTAGE:
+        mv = (p[0] << 8) | p[1]
+        if mv < 2500:            # nonsense / not measured yet
+            return None, bool(p[2] & 0x80)
+        return voltage_to_percent(mv), bool(p[2] & 0x80)
+    return None, False
+
+
+def _approx_from_flags(flags: int) -> Optional[int]:
+    for bit, pct in ((8, 90), (4, 50), (2, 20), (1, 5)):
+        if flags & bit:
+            return pct
+    return None
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "device"
+
+
+class Channel:
+    """Request/response over the long collection. The short collection, when it
+    can be opened, is read too, because the receiver's errors arrive there."""
+
+    def __init__(self, long_handle, short_handle=None,
+                 clock: Callable[[], float] = time.monotonic):
+        self.handles = [h for h in (long_handle, short_handle) if h is not None]
+        self.long = long_handle
+        self.clock = clock
+
+    def close(self):
+        for h in self.handles:
+            try:
+                h.close()
+            except Exception:
+                pass
+
+    def _drain(self):
+        for h in self.handles:
+            for _ in range(32):
+                if not h.read(64, 0):
+                    break
+
+    def call(self, index: int, feature_index: int, function: int,
+             params: Sequence[int] = (), timeout: float = 1.0) -> List[int]:
+        self._drain()
+        self.long.write(build_request(index, feature_index, function, params))
+        deadline = self.clock() + timeout
+        while self.clock() < deadline:
+            for i, h in enumerate(self.handles):
+                report = h.read(64, 40 if i == 0 else 0)
+                if report:
+                    params_out = match_reply(report, index, feature_index, function)
+                    if params_out is not None:
+                        return params_out
+        raise TimeoutError(f"no reply from device {index:#x}")
+
+    def feature_index(self, index: int, feature_id: int) -> Optional[int]:
+        try:
+            p = self.call(index, 0, 0, (feature_id >> 8, feature_id & 0xFF))
+        except HidppError as e:
+            if e.legacy:
+                raise
+            return None
+        return p[0] or None
+
+
+@dataclass
+class Profile:
+    """What we learned about a device the first time it answered."""
+    key: str
+    name: str
+    kind: str
+    feature: int
+    feature_index: int
+
+
+def discover(ch: Channel, index: int) -> Optional[Profile]:
+    battery = None
+    for feature in BATTERY_FEATURES:
+        fi = ch.feature_index(index, feature)
+        if fi:
+            battery = (feature, fi)
+            break
+    if battery is None:
+        return None
+    name, kind = "Logitech device", DEVICE
+    fi = ch.feature_index(index, F_NAME)
+    if fi:
+        length = ch.call(index, fi, 0)[0]
+        raw = b""
+        while len(raw) < length:
+            chunk = bytes(ch.call(index, fi, 1, (len(raw),))[:16])
+            if not chunk.strip(b"\0"):
+                break
+            raw += chunk
+        name = raw[:length].decode("utf-8", "replace").strip("\0 ") or name
+        kind = _TYPES.get(ch.call(index, fi, 2)[0], DEVICE)
+    unit = ""
+    fi = ch.feature_index(index, F_DEVICE_INFO)
+    if fi:
+        p = ch.call(index, fi, 0)
+        if any(p[1:5]):
+            unit = bytes(p[1:5]).hex()
+    key = f"logi-{unit}" if unit else f"logi-{slug(name)}"
+    return Profile(key, name, kind, battery[0], battery[1])
+
+
+class LogitechSource:
+    """Polled source: every :meth:`poll` returns the current readings."""
+
+    name = "logitech"
+
+    def __init__(self, api=None, known: Optional[Dict[str, dict]] = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self.api = api or HidApi()
+        self.clock = clock
+        self.profiles: Dict[str, Profile] = {}   # slot id -> profile (this session)
+        # slot id -> {"key", "name", "kind"}; persisted so a mouse that is off at
+        # start-up still gets its (grey) icon.
+        self.known: Dict[str, dict] = known if known is not None else {}
+        self.log: List[str] = []
+
+    @staticmethod
+    def slot_id(pid: int, index: int) -> str:
+        return f"{pid:04x}:{index}"
+
+    def _collections(self) -> Dict[int, Dict[int, bytes]]:
+        groups: Dict[int, Dict[int, bytes]] = {}
+        for d in self.api.enumerate(LOGITECH_VID):
+            if d.get("usage_page") == VENDOR_PAGE and d.get("usage") in (USAGE_SHORT, USAGE_LONG):
+                groups.setdefault(d["product_id"], {})[d["usage"]] = d["path"]
+        return {pid: g for pid, g in groups.items() if USAGE_LONG in g}
+
+    def _open(self, paths: Dict[int, bytes]) -> Channel:
+        long_h = self.api.open(paths[USAGE_LONG])
+        short_h = None
+        if USAGE_SHORT in paths:
+            try:
+                short_h = self.api.open(paths[USAGE_SHORT])
+            except OSError:
+                pass
+        return Channel(long_h, short_h, self.clock)
+
+    def _read(self, ch: Channel, pid: int, index: int) -> Optional[Reading]:
+        sid = self.slot_id(pid, index)
+        try:
+            prof = self.profiles.get(sid)
+            if prof is None:
+                prof = discover(ch, index)
+                if prof is None:
+                    self.log.append(f"{sid}: no battery feature")
+                    return None
+                self.profiles[sid] = prof
+                self.known[sid] = {"key": prof.key, "name": prof.name, "kind": prof.kind}
+            p = ch.call(index, prof.feature_index, battery_function(prof.feature))
+        except HidppError as e:
+            self.profiles.pop(sid, None)
+            if e.legacy and e.code == ERR_UNKNOWN_DEVICE:
+                self.known.pop(sid, None)       # slot is empty
+            self.log.append(f"{sid}: {e}")
+            return None
+        except TimeoutError as e:
+            self.log.append(f"{sid}: {e}")
+            return None
+        level, charging = decode_battery(prof.feature, p)
+        self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
+        return Reading(prof.key, prof.name, prof.kind, level, charging, online=True)
+
+    def poll(self) -> List[Reading]:
+        self.log = []
+        out: List[Reading] = []
+        groups = self._collections()
+        for pid, paths in groups.items():
+            try:
+                ch = self._open(paths)
+            except OSError as e:
+                self.log.append(f"{pid:04x}: open failed: {e}")
+                continue
+            try:
+                for index in (RECEIVER_SLOTS if pid in RECEIVERS else (WIRED,)):
+                    r = self._read(ch, pid, index)
+                    if r:
+                        out.append(r)
+            except OSError as e:
+                self.log.append(f"{pid:04x}: {e}")
+            finally:
+                ch.close()
+        online = {r.key for r in out}
+        for sid, info in self.known.items():
+            if info["key"] not in online:
+                pid = int(sid.split(":")[0], 16)
+                note = "switched off" if pid in groups else "not connected"
+                out.append(Reading(info["key"], info["name"], info.get("kind", DEVICE),
+                                   None, False, online=False, note=note))
+        return out

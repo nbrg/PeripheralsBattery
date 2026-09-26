@@ -1,0 +1,156 @@
+import pytest
+
+from peribatt import hidpp
+from peribatt.hidpp import (
+    F_STATUS,
+    F_UNIFIED,
+    F_VOLTAGE,
+    HidppError,
+    LogitechSource,
+    build_request,
+    decode_battery,
+    match_reply,
+    voltage_to_percent,
+)
+from peribatt.model import MOUSE
+
+from .fakes import FakeApi, FakeClock, FakeHidppChannel, FakeLogiDevice, QueueHandle
+
+RECEIVER_PID, WIRED_PID = 0xC539, 0xC088
+
+
+def test_build_request_layout():
+    req = build_request(1, 0x06, 1, (0xAA,))
+    assert req[:5] == [0x11, 0x01, 0x06, 0x1B, 0xAA]
+    assert len(req) == 20
+    with pytest.raises(ValueError):
+        build_request(1, 0, 0, range(20))
+
+
+def test_match_reply_ok_unrelated_and_errors():
+    ok = [0x11, 1, 6, 0x0B, 7, 8] + [0] * 14
+    assert match_reply(ok, 1, 6, 0)[:2] == [7, 8]
+    assert match_reply(ok, 2, 6, 0) is None                    # other device
+    assert match_reply([0x11, 1, 6, 0x1B] + [0] * 16, 1, 6, 0) is None   # other function
+    with pytest.raises(HidppError) as e:
+        match_reply([0x10, 1, 0x8F, 6, 0x0B, 0x09, 0], 1, 6, 0)
+    assert e.value.legacy and e.value.code == 0x09
+    with pytest.raises(HidppError) as e:
+        match_reply([0x11, 1, 0xFF, 6, 0x0B, 0x05] + [0] * 14, 1, 6, 0)
+    assert not e.value.legacy
+
+
+@pytest.mark.parametrize("mv,pct", [(4200, 100), (4186, 100), (3811, 50), (3500, 0),
+                                    (3000, 0), (3835, 55)])
+def test_voltage_curve(mv, pct):
+    assert voltage_to_percent(mv) == pct
+
+
+def test_voltage_curve_is_monotonic():
+    values = [voltage_to_percent(mv) for mv in range(3400, 4300, 5)]
+    assert values == sorted(values)
+
+
+def test_decode_each_battery_feature():
+    assert decode_battery(F_VOLTAGE, [0x0F, 0x03, 0x00]) == (57, False)   # 3843 mV
+    assert decode_battery(F_VOLTAGE, [0x0F, 0x03, 0x80]) == (57, True)
+    assert decode_battery(F_VOLTAGE, [0x00, 0x00, 0x00]) == (None, False)
+    assert decode_battery(F_UNIFIED, [64, 4, 0, 0]) == (64, False)
+    assert decode_battery(F_UNIFIED, [0, 2, 1, 1]) == (20, True)          # level from flags
+    assert decode_battery(F_STATUS, [80, 50, 1]) == (80, True)
+    assert decode_battery(F_STATUS, [0, 0, 0]) == (None, False)
+
+
+def receiver(devices, pid=RECEIVER_PID, with_short=True):
+    api = FakeApi()
+    short = QueueHandle() if with_short else None
+    long_h = FakeHidppChannel(devices, short)
+    api.add(0x046D, pid, b"long", long_h, 0xFF00, 0x0002)
+    if with_short:
+        api.add(0x046D, pid, b"short", short, 0xFF00, 0x0001)
+    api.add(0x046D, pid, b"kbd", QueueHandle(), 0x0001, 0x0006)   # ignored collection
+    return api, long_h
+
+
+def test_reads_g_pro_wireless_through_receiver():
+    mouse = FakeLogiDevice(battery=(0x0F, 0x03, 0x00))
+    api, _ = receiver({1: mouse})
+    src = LogitechSource(api=api, clock=FakeClock())
+    [r] = src.poll()
+    assert (r.key, r.name, r.kind, r.level, r.charging, r.online) == \
+        ("logi-1a2b3c4d", "PRO Wireless", MOUSE, 57, False, True)
+    assert src.known["c539:1"]["name"] == "PRO Wireless"
+
+
+def test_second_poll_skips_discovery():
+    mouse = FakeLogiDevice()
+    api, _ = receiver({1: mouse})
+    src = LogitechSource(api=api, clock=FakeClock())
+    src.poll()
+    first = mouse.calls
+    src.poll()
+    assert mouse.calls - first == 1                   # just the battery request
+
+
+def test_switched_off_mouse_stays_as_offline_reading():
+    mouse = FakeLogiDevice()
+    api, _ = receiver({1: mouse})
+    src = LogitechSource(api=api, clock=FakeClock())
+    src.poll()
+    mouse.online = False
+    [r] = src.poll()
+    assert not r.online and r.note == "switched off" and r.key == "logi-1a2b3c4d"
+
+
+def test_known_mouse_restored_from_settings_while_receiver_unplugged():
+    src = LogitechSource(api=FakeApi(), known={"c539:1": {"key": "logi-x", "name": "PRO", "kind": "mouse"}})
+    [r] = src.poll()
+    assert not r.online and r.note == "not connected"
+
+
+def test_unpaired_slot_is_forgotten():
+    api, _ = receiver({})
+    src = LogitechSource(api=api, clock=FakeClock(),
+                         known={"c539:1": {"key": "logi-x", "name": "PRO", "kind": "mouse"}})
+    assert src.poll() == []
+    assert src.known == {}
+
+
+def test_timeout_without_short_collection_counts_as_offline():
+    mouse = FakeLogiDevice()
+    api, long_h = receiver({1: mouse}, with_short=False)
+    src = LogitechSource(api=api, clock=FakeClock(step=0.2))
+    src.poll()
+    mouse.online = False       # error replies go to the (unopened) short collection
+    [r] = src.poll()
+    assert not r.online
+
+
+def test_charging_on_cable_merges_with_receiver_copy():
+    from peribatt.model import merge
+    wired_mouse = FakeLogiDevice(battery=(0x0F, 0x03, 0x80))
+    api, _ = receiver({1: FakeLogiDevice(online=False)})
+    api.add(0x046D, WIRED_PID, b"wired", FakeHidppChannel({0xFF: wired_mouse}), 0xFF00, 0x0002)
+    src = LogitechSource(api=api, clock=FakeClock())
+    [r] = merge(src.poll())
+    assert r.online and r.charging and r.level == 57
+
+
+def test_unified_battery_device():
+    kb = FakeLogiDevice(name="G915", dev_type=0, battery_feature=F_UNIFIED, battery=(88, 8, 0, 0))
+    api, _ = receiver({2: kb})
+    [r] = LogitechSource(api=api, clock=FakeClock()).poll()
+    assert (r.kind, r.level) == ("keyboard", 88)
+
+
+def test_open_failure_is_contained():
+    api = FakeApi()
+    api.add(0x046D, RECEIVER_PID, b"long", OSError("access denied"), 0xFF00, 0x0002)
+    src = LogitechSource(api=api)
+    assert src.poll() == []
+    assert "open failed" in src.log[0]
+
+
+def test_slug():
+    assert hidpp.slug("G PRO Wireless!") == "g-pro-wireless"
+    assert hidpp.slug("***") == "device"
