@@ -150,6 +150,8 @@ def run_tray() -> int:
         pass
     finally:
         app.stop()
+        if getattr(app, "ui", None) is not None:
+            app.ui.stop()
         mic.stop()
         for s in app.sources:
             if hasattr(s, "close"):
@@ -161,42 +163,29 @@ def run_tray() -> int:
 
 
 def wire_windows(app) -> None:
-    """Settings window and learn wizard, opened from the tray menu."""
+    """Settings window and learn wizard: a local web UI, started on demand."""
+    from . import winshell
     from .sources import reload_recipes, supported_check
-    from .ui import UiThread
-
-    ui = UiThread()
+    from .web import WebUi
 
     def saved(_recipe):
         reload_recipes(app.sources)
         app.refresh_event.set()
 
-    def open_learn():
-        from .learn_ui import open_learn as make
-        ui.show("learn", lambda root: make(root, recipes_path=app_dir() / "recipes.json",
-                                           is_supported=supported_check(app.sources),
-                                           on_saved=saved))
-
-    def open_settings():
-        from .settings_ui import open_settings as make
-        ui.show("settings", lambda root: make(root, app, open_learn=open_learn))
-
+    ui = WebUi(app, is_supported=supported_check(app.sources), on_recipe_saved=saved,
+               set_autostart=winshell.set_autostart, autostart_enabled=winshell.autostart_enabled)
     app.ui = ui
-    app.open_learn = open_learn
-    app.open_settings = open_settings
+    app.open_settings = lambda: ui.open()
+    app.open_learn = lambda: ui.open("learn")
 
 
 def cmd_learn() -> int:
     """The wizard on its own: produces a recipe without the tray app running."""
-    from .learn_ui import open_learn
     from .sources import build_sources, supported_check
-    from .ui import UiThread
-    ui = UiThread()
-    check = supported_check(build_sources(Store.load()))
-    ui.show("learn", lambda root: open_learn(root, recipes_path=app_dir() / "recipes.json",
-                                             is_supported=check))
-    while ui.running:
-        time.sleep(0.2)
+    from .web import WebUi
+    ui = WebUi(None, is_supported=supported_check(build_sources(Store.load())))
+    print(f"Opening {ui.open('learn')}")
+    ui.stopped.wait()
     return 0
 
 

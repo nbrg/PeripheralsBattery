@@ -21,10 +21,13 @@ peribatt = "peribatt.__main__:main"
 packages = ["peribatt"]
 
 [tool.setuptools.package-data]
-peribatt = ["recipes.json"]
+peribatt = ["recipes.json", "webui/*", "webui/assets/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "peribatt.__version__" }
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
 
 [tool.ruff]
 line-length = 110

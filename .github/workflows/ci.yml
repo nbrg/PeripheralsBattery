@@ -10,6 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    # The settings UI (React + shadcn/ui) is committed pre-built in peribatt/webui so
+    # the app runs without Node; this checks that build matches its source.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Committed build is up to date
+        run: git diff --exit-code --stat -- peribatt/webui || (echo "Run 'npm run build' in web/ and commit peribatt/webui" && exit 1)
+
   test:
     strategy:
       fail-fast: false
@@ -24,15 +42,15 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m ruff check .
-      - name: Tests (Linux, windows drawn on a virtual display)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -q
-      - name: Tests (Windows)
-        if: runner.os == 'Windows'
-        run: python -m pytest -q
+      - name: Browser for the UI tests
+        if: runner.os == 'Linux' && matrix.python == '3.12'
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python -m pytest -q
 
   build:
-    needs: test
+    needs: [web, test]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     permissions:
@@ -60,6 +78,7 @@ jobs:
         run: |
           $p = Start-Process dist\PeripheralsBattery\PeripheralsBattery.exe -ArgumentList "--once" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "PeripheralsBattery.exe --once exited with $($p.ExitCode)" }
+          if (-not (Test-Path dist\PeripheralsBattery\_internal\peribatt\webui\index.html)) { throw "settings UI missing from the build" }
       - name: Sign the app
         shell: pwsh
         run: installer\sign.ps1 dist\PeripheralsBattery\PeripheralsBattery.exe

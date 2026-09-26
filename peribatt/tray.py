@@ -144,16 +144,17 @@ class PystrayBackend:
             # at the top always match the icons.
             out = [Item(line, None, enabled=False) for line in (app.menu_status() or ["No devices yet"])]
             out.append(Menu.SEPARATOR)
+            # Left-click runs the default item: mic toggle on headsets, else the settings window.
+            reading = app.readings.get(key)
+            mic = reading is not None and reading.kind == HEADSET and app.mic_toggle is not None
+            if mic:
+                out.append(Item("Toggle mic mute", lambda: app.mic_toggle(), default=True))
             if app.open_settings:
-                out.append(Item("Settings…", lambda: app.open_settings()))
+                out.append(Item("Settings…", lambda: app.open_settings(), default=not mic))
             if app.open_learn:
                 out.append(Item("Learn a new device…", lambda: app.open_learn()))
-            reading = app.readings.get(key)
-            if reading is not None and reading.kind == HEADSET and app.mic_toggle:
-                out.append(Item("Toggle mic mute", lambda: app.mic_toggle(), default=True))
-                out.append(Item("Refresh now", refresh))
-            else:
-                out.append(Item("Refresh now", refresh, default=True))
+            out.append(Item("Refresh now", refresh,
+                            default=not mic and app.open_settings is None))
             out += [
                 Item("Poll every", Menu(*(radio("poll_seconds", v, lbl) for v, lbl in
                                           ((30, "30 seconds"), (60, "1 minute"),

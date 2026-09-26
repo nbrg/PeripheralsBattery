@@ -7,3 +7,4 @@ build/
 dist/
 *.spec
 .venv/
+web/node_modules/

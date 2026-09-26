@@ -31,8 +31,10 @@ All thresholds can be changed in `settings.json`.
 - **Notifications**: low battery (once per discharge) and "fully charged, unplug it".
 - **Starts with Windows** (switched on at first launch; untick it in the menu).
 - **Remembers your devices**: a mouse that is off at boot still gets its grey icon.
-- **Settings window**: thresholds, notifications, sources, and a device list where
-  you can rename, hide or forget devices - no JSON editing needed.
+- **A modern settings window** built with React + [shadcn/ui](https://ui.shadcn.com): live
+  device cards, instant-save settings, colour thresholds with a live icon preview,
+  light/dark following Windows. It opens as a chromeless Edge app window and costs
+  nothing while closed.
 - **Learn a new device**: a wizard that listens to an unsupported USB dongle while
   you mute/unmute and plug/unplug it, finds the battery, mute and charging bytes,
   and saves them as a shareable recipe.
@@ -41,6 +43,12 @@ All thresholds can be changed in `settings.json`.
 - `--once` / `--json` for scripts and widgets, `--probe` for diagnostics.
 - **Light on resources**: one battery read a minute, event-driven everywhere else;
   measured at ~0.005 % of one CPU core and ~30 MB RAM while idle.
+
+![Settings - devices](docs/settings-devices.png)
+
+| | |
+|---|---|
+| ![Alerts and colours](docs/settings-alerts.png) | ![Learn a device](docs/settings-learn.png) |
 
 ## Supported devices
 
@@ -136,9 +144,13 @@ sources (one per protocol)                 app core                 front end
 - `peribatt/render.py` — vector pictograms, drawn 4× and box-filtered down; results are cached.
 - `peribatt/hidpp.py`, `hyperx.py`, `razer.py`, `recipes.py`, `bluetooth.py`, `xinput.py`, `hsc.py` — the providers.
 - `peribatt/micmute.py` — Windows Core Audio via raw COM (ctypes, no pywin32).
-- `peribatt/prefs.py` + `settings_ui.py` — the settings window (logic / widgets).
-- `peribatt/learn.py` + `learn_ui.py` — the learn wizard (capture and analysis / widgets).
-- `peribatt/ui.py` — a Tk thread that only exists while a window is open.
+- `peribatt/web.py` — a local-only HTTP server (loopback, per-session token, Host check,
+  strict CSP) that serves the settings UI and its JSON API; it starts when the window
+  opens and stops ~45 s after it closes.
+- `web/` — the settings UI source: Vite + React + TypeScript + Tailwind + shadcn/ui. Its
+  build is committed in `peribatt/webui/`, so running the app never needs Node.
+- `peribatt/prefs.py` / `peribatt/learn.py` — settings validation and the learn-wizard
+  analysis, shared by the UI and the tests.
 - `installer/` — Inno Setup script and the signing step used by CI.
 
 Efficiency choices: the HyperX reader threads block on the device and wake only
@@ -153,10 +165,13 @@ changes; the one-folder build avoids unpacking a one-file .exe at every boot.
 pip install -e ".[dev]"
 ruff check . && pytest -q
 python docs/make_preview.py      # regenerate docs/icons.png
+
+cd web && npm ci && npm run build   # after changing the settings UI (commit peribatt/webui)
 ```
 
-The tests run on Linux and Windows (CI does both; on Linux the windows are drawn
-on a virtual display with `xvfb-run`). The device protocols are tested against
+The tests run on Linux and Windows (CI does both). The settings UI is exercised in
+a real Chromium with Playwright (`pip install playwright && playwright install
+chromium`), including the whole learn wizard against a simulated dongle. The device protocols are tested against
 fake devices in `tests/fakes.py`, the whole app is started and exited through a
 fake `pystray`, the settings window and the learn wizard are driven click by
 click, and on Windows the native API bindings are exercised for real.

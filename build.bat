@@ -5,8 +5,9 @@ python -m pip install --upgrade -r requirements.txt pyinstaller || exit /b 1
 python -m PyInstaller --noconfirm --clean --onedir --windowed ^
   --name PeripheralsBattery --icon docs\app.ico ^
   --add-data "peribatt\recipes.json;peribatt" ^
+  --add-data "peribatt\webui;peribatt\webui" ^
   --hidden-import pystray._win32 ^
-  --exclude-module unittest --exclude-module pydoc ^
+  --exclude-module tkinter --exclude-module unittest --exclude-module pydoc ^
   --exclude-module test --exclude-module lib2to3 --exclude-module xmlrpc ^
   --exclude-module pystray._xorg --exclude-module pystray._gtk ^
   --exclude-module pystray._appindicator --exclude-module pystray._darwin ^
