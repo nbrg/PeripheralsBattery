@@ -5,6 +5,12 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Build and publish a release (tag v<peribatt.__version__>)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,7 +57,8 @@ jobs:
 
   build:
     needs: [web, test]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A pushed v* tag, or a manual run with "release" ticked (the release then creates the tag).
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     runs-on: windows-latest
     permissions:
       contents: write
@@ -63,13 +70,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Tag must match the app version
+      - name: Version (a pushed tag must match the app version)
         shell: pwsh
         run: |
-          $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
           $app = python -c "import peribatt; print(peribatt.__version__)"
-          if ($tag -ne $app) { throw "tag v$tag but peribatt.__version__ is $app" }
-          "VERSION=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if ("$env:GITHUB_REF" -like "refs/tags/v*") {
+            $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
+            if ($tag -ne $app) { throw "tag v$tag but peribatt.__version__ is $app" }
+          }
+          "VERSION=$app" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build the app
         run: .\build.bat
         shell: cmd
@@ -103,6 +112,8 @@ jobs:
             dist/PeripheralsBattery-*-windows.zip
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
           name: Peripherals Battery ${{ env.VERSION }}
           generate_release_notes: true
           files: |

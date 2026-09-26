@@ -177,7 +177,7 @@ fake devices in `tests/fakes.py`, the whole app is started and exited through a
 fake `pystray`, the settings window and the learn wizard are driven click by
 click, and on Windows the native API bindings are exercised for real.
 
-**Releasing:** bump `peribatt/__init__.py`, then push a tag `vX.Y.Z`. CI builds
+**Releasing:** bump `peribatt/__init__.py`, then push a tag `vX.Y.Z` - or run the CI workflow by hand with *release* ticked, which creates the tag. CI builds
 the app, smoke-tests it, signs it (when a certificate is configured), builds the
 installer and attaches both to a GitHub release.
 
