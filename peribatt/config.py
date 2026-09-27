@@ -30,6 +30,7 @@ DEFAULTS: Dict[str, Any] = {
     "hidden": [],                # device keys the user chose to hide
     "names": {},                 # device key -> name chosen by the user
     "first_run_done": False,     # autostart is switched on once, at the very first launch
+    "welcomed": False,           # the first-launch hint about the ^ tray overflow was shown
 }
 
 

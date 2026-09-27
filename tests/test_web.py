@@ -171,7 +171,11 @@ def test_learn_flow_over_http(client, app):
     code, res = client.json("POST", "/api/learn/recipe", {"name": "My Headset", "kind": "headset"})
     assert res["recipe"]["name"] == "My Headset" and len(res["recipe"]["listen"]) == 2
     code, res = client.json("POST", "/api/learn/save", {"name": "My Headset", "kind": "headset"})
-    assert code == 200 and client.saved and dongle.closed
+    assert code == 200 and client.saved
+    end = time.time() + 5                              # its reader thread releases the handle
+    while not dongle.closed and time.time() < end:
+        time.sleep(0.02)
+    assert dongle.closed
     saved = json.loads(client.ui.recipes_path.read_text())
     assert saved[0]["product_ids"] == ["0x0001"]
     assert client.json("POST", "/api/learn/explode", {})[0] == 400

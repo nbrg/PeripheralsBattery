@@ -19,11 +19,13 @@ class HidApi:
     "no devices", never a crash."""
 
     def __init__(self):
+        self.error = ""
         try:
             import hid  # noqa: F401
             self._hid = hid
         except Exception as e:  # pragma: no cover - depends on the machine
             log.error("hidapi unavailable: %s", e)
+            self.error = f"{type(e).__name__}: {e}"
             self._hid = None
 
     def enumerate(self, vendor_id: int) -> List[dict]:

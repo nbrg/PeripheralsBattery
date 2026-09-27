@@ -157,7 +157,8 @@ def test_whole_app_starts_and_exits_from_the_menu(fake_pystray, monkeypatch):
         time.sleep(0.02)
     assert FakeIcon.all, "no tray icon appeared"
     placeholder = FakeIcon.all[0]
-    assert "looking for devices" in placeholder.title
+    assert placeholder.title.startswith("Peripherals Battery:")          # searching / nothing found
+    assert placeholder.notes and "^" in placeholder.notes[0][1]          # first-launch welcome
     find(placeholder.menu, "Exit").action()
     t.join(10)
     assert result.get("rc") == 0 and placeholder.stopped

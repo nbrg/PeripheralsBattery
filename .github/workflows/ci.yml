@@ -56,13 +56,14 @@ jobs:
       - run: python -m pytest -q
 
   build:
+    # Every push builds and runs the packaged app. Publishing only happens for a pushed
+    # v* tag, or a manual run with "release" ticked (the release then creates the tag).
     needs: [web, test]
-    # A pushed v* tag, or a manual run with "release" ticked (the release then creates the tag).
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     runs-on: windows-latest
     permissions:
       contents: write
     env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
       SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
       SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
     steps:
@@ -88,10 +89,32 @@ jobs:
           $p = Start-Process dist\PeripheralsBattery\PeripheralsBattery.exe -ArgumentList "--once" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "PeripheralsBattery.exe --once exited with $($p.ExitCode)" }
           if (-not (Test-Path dist\PeripheralsBattery\_internal\peribatt\webui\index.html)) { throw "settings UI missing from the build" }
+      - name: Smoke-test the packaged tray app
+        shell: pwsh
+        run: |
+          # Run the real .exe as a tray app for a while, then read its log: it must have
+          # started, searched for devices and shown an icon, without a single error.
+          $data = Join-Path $env:RUNNER_TEMP "pb-home"
+          New-Item -ItemType Directory $data | Out-Null
+          '{"settings": {"first_run_done": true, "welcomed": true}}' | Set-Content "$data\settings.json"
+          $env:PERIBATT_HOME = $data
+          $p = Start-Process dist\PeripheralsBattery\PeripheralsBattery.exe -PassThru
+          Start-Sleep -Seconds 15
+          $alive = -not $p.HasExited
+          if ($alive) { Stop-Process -Id $p.Id -Force }
+          $log = Get-Content "$data\peribatt.log" -Raw
+          Write-Host $log
+          if (-not $alive) { throw "the tray app exited on its own (code $($p.ExitCode))" }
+          if ($log -notmatch "started") { throw "no startup line in the log" }
+          if ($log -notmatch "tray icon shown") { throw "no tray icon was shown" }
+          if ($log -notmatch "logitech: \d+ device") { throw "the first device search never finished" }
+          if ($log -match "CRITICAL|ERROR|Traceback") { throw "errors in the log" }
       - name: Sign the app
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: installer\sign.ps1 dist\PeripheralsBattery\PeripheralsBattery.exe
       - name: Build the installer
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -99,18 +122,22 @@ jobs:
           & $iscc "/DAppVersion=$env:VERSION" installer\PeripheralsBattery.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
       - name: Sign the installer
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: installer\sign.ps1 "dist\PeripheralsBattery-$env:VERSION-setup.exe"
       - name: Zip the portable build
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: Compress-Archive -Path dist\PeripheralsBattery -DestinationPath "dist\PeripheralsBattery-$env:VERSION-windows.zip"
       - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
         with:
           name: PeripheralsBattery-${{ env.VERSION }}
           path: |
             dist/PeripheralsBattery-*-setup.exe
             dist/PeripheralsBattery-*-windows.zip
       - uses: softprops/action-gh-release@v2
+        if: env.RELEASE == 'true'
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}

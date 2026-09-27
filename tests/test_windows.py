@@ -49,3 +49,32 @@ def test_power_notifications_register_and_unregister():
     assert w.start() is True
     w.stop()
     assert not w.registered
+
+
+def test_real_tray_backend(tmp_path, caplog):
+    """The real pystray backend on Windows: create, update, notify, menus, remove."""
+    import logging
+    import time
+
+    from peribatt import style
+    from peribatt.app import App
+    from peribatt.config import Store
+    from peribatt.model import MOUSE, Reading
+    from peribatt.render import render
+    from peribatt.tray import PystrayBackend
+
+    backend = PystrayBackend(16)
+    app = App(Store(tmp_path / "settings.json"), backend)
+    backend.app = app
+    with caplog.at_level(logging.WARNING, logger="peribatt"):
+        app.start()
+        app.apply([Reading("logi-1", "PRO Wireless", MOUSE, 70)])
+        time.sleep(1.0)                                  # let pystray's threads run
+        app.apply([Reading("logi-1", "PRO Wireless", MOUSE, 10)])
+        backend.set_image("logi-1", render(16, MOUSE, 5, style.RED), ())
+        backend.notify("logi-1", "Low battery", "test")
+        backend.refresh_menus()
+        time.sleep(0.5)
+        for key in list(backend.icons):
+            backend.remove(key)
+    assert "could not" not in caplog.text and "Traceback" not in caplog.text

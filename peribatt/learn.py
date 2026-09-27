@@ -96,21 +96,29 @@ class Capture:
 
     def close(self) -> None:
         self._stop.set()
-        for h in self.handles:
-            if h is not None:
-                try:
-                    h.close()
-                except Exception:
-                    pass
+        if not self.threaded:
+            for h in self.handles:
+                if h is not None:
+                    try:
+                        h.close()
+                    except Exception:
+                        pass
+        # Threaded: readers close their own handles (never under a blocked read).
 
     def _reader(self, i: int, h) -> None:
-        while not self._stop.is_set():
+        try:
+            while not self._stop.is_set():
+                try:
+                    data = h.read(64, 250)
+                except (OSError, ValueError):
+                    return
+                if data and not self._stop.is_set():
+                    self.feed(i, data)
+        finally:
             try:
-                data = h.read(64, 250)
-            except (OSError, ValueError):
-                return
-            if data:
-                self.feed(i, data)
+                h.close()
+            except Exception:
+                pass
 
     def feed(self, collection: int, data: Sequence[int]) -> None:
         with self._lock:

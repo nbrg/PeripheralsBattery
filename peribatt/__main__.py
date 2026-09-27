@@ -22,11 +22,6 @@ from .model import Reading, merge
 
 log = logging.getLogger("peribatt")
 
-INTERESTING_VIDS = {0x046D: "Logitech", 0x0951: "HyperX (Kingston)", 0x03F0: "HyperX (HP)",
-                    0x1532: "Razer", 0x1038: "SteelSeries", 0x1B1C: "Corsair",
-                    0x10F5: "Turtle Beach", 0x1E7D: "Roccat/Turtle Beach", 0x3329: "Audeze"}
-
-
 def setup_logging(to_file: bool, verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     handlers: List[logging.Handler] = []
@@ -38,6 +33,23 @@ def setup_logging(to_file: bool, verbose: bool = False) -> None:
         handlers.append(logging.StreamHandler())
     logging.basicConfig(level=level, handlers=handlers,
                         format="%(asctime)s %(levelname)s %(threadName)s: %(message)s")
+    install_crash_logging()
+
+
+def install_crash_logging() -> None:
+    """The packaged app has no console: without this, an error in any thread
+    would vanish, and that thread (say, the one that creates the icons) with it."""
+    def thread_hook(args):
+        if args.exc_type is SystemExit:
+            return
+        log.critical("uncaught error in thread %s", getattr(args.thread, "name", "?"),
+                     exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+    def main_hook(exc_type, exc, tb):
+        log.critical("uncaught error", exc_info=(exc_type, exc, tb))
+
+    threading.excepthook = thread_hook
+    sys.excepthook = main_hook
 
 
 def collect(store: Store, settle: float = 1.5):
@@ -79,27 +91,17 @@ def cmd_once(as_json: bool) -> int:
 
 
 def cmd_probe() -> int:
+    from . import diagnostics
     from .hidio import HidApi
-    api = HidApi()
-    print(f"{DISPLAY_NAME} {__version__} on {sys.platform}, Python {sys.version.split()[0]}\n")
-    print("HID collections of known gaming brands:")
-    for vid, brand in INTERESTING_VIDS.items():
-        for d in api.enumerate(vid):
-            print(f"  {brand:18} {vid:04x}:{d['product_id']:04x} if={d.get('interface_number')}"
-                  f" usage={d.get('usage_page', 0):04x}:{d.get('usage', 0):04x}"
-                  f" '{d.get('product_string') or ''}'")
+    from .sources import supported_check
     readings, sources = collect(Store.load())
-    print("\nProviders:")
-    for s in sources:
-        inner = getattr(s, "source", s)
-        lines = getattr(inner, "log", [])
-        print(f"  [{getattr(s, 'name', s)}]" + ("" if lines else " (nothing to report)"))
-        for line in lines:
-            print(f"    {line}")
-    print("\nReadings:")
-    for r in readings:
-        print(f"  {r}")
-    print("\nPaste this report into an issue to get a device supported.")
+    text = diagnostics.report(api=HidApi(), sources=sources, readings=readings,
+                              is_supported=supported_check(sources))
+    if sys.stdout is None or not sys.stdout.isatty() and getattr(sys, "frozen", False):
+        # the packaged app has no console: write the report and open it instead
+        diagnostics.save_and_open(text)
+    else:
+        print(text)
     return 0
 
 
@@ -116,6 +118,7 @@ def run_tray() -> int:
         log.info("already running")
         return 0
     store = Store.load()
+    first_launch = not store["welcomed"]
     if not store["first_run_done"]:
         # Start with Windows by default; the tray menu can switch it off again.
         try:
@@ -146,6 +149,12 @@ def run_tray() -> int:
     power.start()                        # no-op outside Windows; the poll loop also notices sleep
 
     wire_windows(app)
+    app.open_diagnostics = lambda: threading.Thread(
+        target=show_diagnostics, args=(app,), daemon=True, name="diagnostics").start()
+
+    app.start()                          # an icon right away, before the first (slower) search
+    if first_launch:
+        welcome(app)
 
     for target, name in ((app.poll_loop, "poll"), (app.flash_loop, "flash")):
         threading.Thread(target=target, name=name, daemon=True).start()
@@ -167,6 +176,30 @@ def run_tray() -> int:
             backend.remove(key)
         store.save()
     return 0
+
+
+def welcome(app) -> None:
+    """First launch: say where the icons are (Windows 11 hides new tray icons
+    under the ^ arrow) and open the settings window so the app is visibly running."""
+    from .app import PLACEHOLDER
+    app.backend.notify(PLACEHOLDER, "Peripherals Battery is running",
+                       "Your devices appear as icons next to the clock. If you can't see them, "
+                       "click ^ by the clock and drag them onto the taskbar.")
+    app.store["welcomed"] = True
+    app.store.save()
+    if app.open_settings:
+        app.open_settings()
+
+
+def show_diagnostics(app) -> None:
+    from . import diagnostics
+    from .sources import supported_check
+    try:
+        text = diagnostics.report(app, is_supported=supported_check(app.sources))
+        path = diagnostics.save_and_open(text)
+        log.info("diagnostics written to %s", path)
+    except Exception:
+        log.exception("diagnostics failed")
 
 
 def wire_windows(app) -> None:

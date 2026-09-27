@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 import threading
-from collections import OrderedDict
 from typing import Dict
 
 from . import DISPLAY_NAME, __version__, winshell
@@ -17,13 +16,13 @@ from .model import HEADSET
 
 log = logging.getLogger("peribatt")
 
-HICON_CACHE = 96
-
 
 class PystrayBackend:
-    """Creates pystray icons on demand. On Windows, icon images are turned into
-    HICONs once and cached, so the 4 Hz mute blink costs no disk I/O (pystray
-    itself writes a temporary .ico for every image change)."""
+    """Creates pystray icons on demand, through pystray's public API only.
+
+    Anything that goes wrong inside pystray's own threads is logged: the packaged
+    app has no console, so an unlogged error there means an icon silently never
+    appears."""
 
     def __init__(self, icon_size: int):
         import pystray
@@ -31,40 +30,46 @@ class PystrayBackend:
         self.icon_size = icon_size
         self.app: App = None                 # set by run()
         self.icons: Dict[str, object] = {}
-        self._hicons: "OrderedDict[tuple, int]" = OrderedDict()
         self._lock = threading.Lock()
 
     # -- Backend protocol -------------------------------------------------
     def show(self, key, image, title):
-        icon = self.pystray.Icon(f"peribatt-{key}", image, title, menu=self._menu(key))
+        icon = self.pystray.Icon(f"peribatt-{len(self.icons)}", image, title, menu=self._menu(key))
 
         def setup(ic):
-            ic.visible = True
+            try:
+                ic.visible = True
+                log.info("tray icon shown: %s", key)
+            except Exception:
+                log.exception("could not show the tray icon for %s", key)
 
         with self._lock:
             self.icons[key] = icon
-        icon.run_detached(setup=setup) if sys.platform == "win32" else \
-            threading.Thread(target=icon.run, daemon=True).start()
+        if sys.platform == "win32":
+            icon.run_detached(setup=setup)
+        else:
+            threading.Thread(target=icon.run, kwargs={"setup": setup}, daemon=True).start()
 
     def set_image(self, key, image, cache_key):
         icon = self.icons.get(key)
-        if icon is None:
-            return
-        if sys.platform == "win32" and self._set_hicon(icon, image, cache_key):
-            return
-        icon.icon = image
+        if icon is not None:
+            try:
+                icon.icon = image
+            except Exception:
+                log.exception("could not update the tray icon for %s", key)
 
     def set_title(self, key, title):
         icon = self.icons.get(key)
         if icon is not None:
-            icon.title = title
+            try:
+                icon.title = title
+            except Exception:
+                log.exception("could not update the tooltip for %s", key)
 
     def remove(self, key):
         with self._lock:
             icon = self.icons.pop(key, None)
         if icon is not None:
-            if getattr(icon, "_icon_handle", None) in self._hicons.values():
-                icon._icon_handle = None      # cached handle: ours to free, not pystray's
             try:
                 icon.stop()
             except Exception as e:
@@ -83,43 +88,7 @@ class PystrayBackend:
             try:
                 icon.update_menu()
             except Exception:
-                pass
-
-    # -- Windows icon cache -------------------------------------------------
-    def _set_hicon(self, icon, image, cache_key) -> bool:
-        try:
-            from pystray._util import serialized_image, win32
-        except ImportError:
-            return False
-        if not getattr(icon, "_hwnd", None):
-            return False
-        try:
-            h = self._hicons.get(cache_key)
-            if h is None:
-                with serialized_image(image, "ICO") as path:
-                    h = win32.LoadImage(None, path, win32.IMAGE_ICON, self.icon_size,
-                                        self.icon_size, win32.LR_LOADFROMFILE)
-                self._hicons[cache_key] = h
-                while len(self._hicons) > HICON_CACHE:
-                    _, old = self._hicons.popitem(last=False)
-                    if not any(getattr(i, "_icon_handle", None) == old for i in self.icons.values()):
-                        win32.DestroyIcon(old)
-            else:
-                self._hicons.move_to_end(cache_key)
-            # pystray owns (and destroys) whatever sits in _icon_handle: free its own
-            # initial handle once, then park a cached one there.
-            old = getattr(icon, "_icon_handle", None)
-            if old and old not in self._hicons.values():
-                try:
-                    win32.DestroyIcon(old)
-                except OSError:
-                    pass
-            icon._icon_handle = h
-            icon._message(win32.NIM_MODIFY, win32.NIF_ICON, hIcon=h)
-            return True
-        except Exception as e:
-            log.debug("hicon path failed, falling back: %s", e)
-            return False
+                log.exception("could not rebuild a tray menu")
 
     # -- menu -------------------------------------------------------------
     def _menu(self, key):
@@ -176,6 +145,8 @@ class PystrayBackend:
                 out.append(Item("Hide this device", lambda: app.hide(key)))
             if s["hidden"]:
                 out.append(Item("Show hidden devices", lambda: app.unhide_all()))
+            if app.open_diagnostics:
+                out.append(Item("Diagnostics…", lambda: app.open_diagnostics()))
             out += [
                 Item("Forget disconnected devices", lambda: app.forget_offline()),
                 Item("Open data folder", lambda: _open_folder()),

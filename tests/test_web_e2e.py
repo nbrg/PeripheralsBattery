@@ -185,7 +185,11 @@ def test_learn_wizard_in_the_browser(browser, demo):
     recipe = json.loads(ui.recipes_path.read_text())[0]
     assert recipe["name"] == "Stealth Pro" and recipe["kind"] == "headset"
     assert {r.get("muted", {}).get("byte") for r in recipe["listen"]} >= {4}
-    assert saved and dongle.closed
+    assert saved
+    end = time.time() + 5                              # its reader thread releases the handle
+    while not dongle.closed and time.time() < end:
+        time.sleep(0.02)
+    assert dongle.closed
     page.close()
 
 

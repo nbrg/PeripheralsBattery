@@ -24,6 +24,9 @@ TOOLTIP_MAX = 127
 RESUME_SETTLE = 3.0          # after waking: give USB and the radios a moment...
 RESUME_RECHECK = 15.0        # ...and look again once wireless devices have reconnected
 SLEEP_GAP = 30.0             # a wait that overran by this much means the PC was asleep
+SLOW_SOURCE = 5.0            # log a warning when one provider takes longer than this
+SEARCHING = "Peripherals Battery: looking for devices…"
+NOTHING_FOUND = "Peripherals Battery: no devices found yet - right-click for Diagnostics"
 # Devices from these sources vanish (rather than turn grey) when the source is switched off.
 SOURCE_SWITCHES = {"bt-": "bluetooth", "xinput-": "xinput"}
 
@@ -87,6 +90,9 @@ class App:
         self.flash_event = threading.Event()
         self._menus_dirty = False
         self._resumed_at: Optional[float] = None
+        self.source_status: Dict[str, dict] = {}       # provider -> last poll's count/time/error
+        self.polled_once = False
+        self.open_diagnostics: Optional[Callable[[], None]] = None
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -213,14 +219,30 @@ class App:
         self.backend.refresh_menus()
 
     def _sync_placeholder(self) -> None:
+        """Until a device icon exists, one app icon: the menu (and Exit) must always
+        be reachable, and it says whether the first search has finished."""
         visible = [k for k in self.shown if k != PLACEHOLDER]
+        title = NOTHING_FOUND if self.polled_once else SEARCHING
         if not visible and PLACEHOLDER not in self.shown:
-            img = render(self.backend.icon_size, DEVICE, None, style.GREY, online=False)
-            self.backend.show(PLACEHOLDER, img, "Peripherals Battery: looking for devices…")
+            img = render(self.backend.icon_size, DEVICE, None, style.neutral(self.light),
+                         light_taskbar=self.light)
+            self.backend.show(PLACEHOLDER, img, title)
             self.shown[PLACEHOLDER] = ()
+            self.titles[PLACEHOLDER] = title
+        elif not visible and self.titles.get(PLACEHOLDER) != title:
+            self.backend.set_title(PLACEHOLDER, title)
+            self.titles[PLACEHOLDER] = title
+            self._menus_dirty = True
         elif visible and PLACEHOLDER in self.shown:
             self.backend.remove(PLACEHOLDER)
             self.shown.pop(PLACEHOLDER)
+            self.titles.pop(PLACEHOLDER, None)
+
+    def start(self) -> None:
+        """Called once before polling starts: show the icon(s) straight away -
+        remembered devices greyed, or the app icon - instead of after the first
+        (possibly slow) search."""
+        self.redraw_all()
 
     def tick_flash(self) -> bool:
         """Advance the blink phase; True while something is blinking."""
@@ -294,10 +316,25 @@ class App:
             self.redraw_all()
         results: List[Reading] = []
         for s in self.sources:
+            name = getattr(s, "name", type(s).__name__)
+            started = time.monotonic()
+            error = ""
+            found: List[Reading] = []
             try:
-                results.extend(s.poll())
+                found = s.poll()
             except Exception as e:           # one broken provider must not stop the rest
-                log.exception("%s poll failed: %s", getattr(s, "name", s), e)
+                error = f"{type(e).__name__}: {e}"
+                log.exception("%s poll failed", name)
+            took = time.monotonic() - started
+            results.extend(found)
+            prev = self.source_status.get(name)
+            self.source_status[name] = {"count": len(found), "seconds": took, "error": error}
+            if prev is None or (prev["count"], prev["error"]) != (len(found), error):
+                log.info("%s: %d device(s) in %.2f s%s", name, len(found), took,
+                         f" ({error})" if error else "")
+            if took > SLOW_SOURCE:
+                log.warning("%s took %.1f s to poll", name, took)
+        self.polled_once = True
         self.apply(results)
         self.store.save()
         return results
@@ -341,30 +378,43 @@ class App:
     def poll_loop(self) -> None:
         fast = [f for f in (getattr(s, "poll_fast", None) for s in self.sources) if f]
         while not self.stop_event.is_set():
-            self.refresh_event.clear()
-            recheck = self._after_resume()
-            if self.stop_event.is_set():
-                return
-            self.poll_once()
-            deadline = time.monotonic() + max(10, int(self.store["poll_seconds"]))
-            if recheck is not None:
-                deadline = min(deadline, recheck)
-            while not self.stop_event.is_set():
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    break
-                # Without a status-pushing source there is nothing to do until the next poll.
-                if self._wait(min(FAST_POLL, left) if fast else left):
-                    break
-                for f in fast:
-                    try:
-                        f()
-                    except Exception as e:
-                        log.debug("fast poll: %s", e)
+            try:
+                self._poll_cycle(fast)
+            except Exception:
+                # Whatever went wrong, keep the app alive and try again shortly.
+                log.exception("poll cycle failed")
+                self.stop_event.wait(10)
+
+    def _poll_cycle(self, fast) -> None:
+        self.refresh_event.clear()
+        recheck = self._after_resume()
+        if self.stop_event.is_set():
+            return
+        self.poll_once()
+        deadline = time.monotonic() + max(10, int(self.store["poll_seconds"]))
+        if recheck is not None:
+            deadline = min(deadline, recheck)
+        while not self.stop_event.is_set():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            # Without a status-pushing source there is nothing to do until the next poll.
+            if self._wait(min(FAST_POLL, left) if fast else left):
+                break
+            for f in fast:
+                try:
+                    f()
+                except Exception as e:
+                    log.debug("fast poll: %s", e)
 
     def flash_loop(self) -> None:
         while not self.stop_event.is_set():
-            if self.tick_flash():
+            try:
+                blinking = self.tick_flash()
+            except Exception:
+                log.exception("blink failed")
+                blinking = False
+            if blinking:
                 time.sleep(FLASH_PERIOD)
             else:
                 self.flash_event.wait()          # no timeout: zero wake-ups while idle

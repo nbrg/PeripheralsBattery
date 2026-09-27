@@ -194,6 +194,14 @@ def load(paths: Sequence[Path] = ()) -> List[Recipe]:
     return out
 
 
+def _close_all(handles) -> None:
+    for h in handles:
+        try:
+            h.close()
+        except Exception:
+            pass
+
+
 def evaluate(step: Step, reply: Sequence[int]) -> Dict[str, object]:
     out: Dict[str, object] = {}
     for name, f in step.fields.items():
@@ -241,23 +249,25 @@ class Listener:
 
     def close(self) -> None:
         self._stop.set()
-        for h in self.handles:
-            try:
-                h.close()
-            except Exception:
-                pass
-        self.handles, self.writer = [], None
+        handles, self.handles, self.writer = self.handles, [], None
+        if not self.threaded:
+            _close_all(handles)
+        # Threaded: every reader closes its own handle when its read returns
+        # (closing it under a blocked read can crash the process).
 
     def _reader(self, handle) -> None:
-        while not self._stop.is_set():
-            try:
-                report = handle.read(64, 5000)
-            except (OSError, ValueError):
-                if not self._stop.is_set():
-                    self.lost = True
-                return
-            if report:
-                self.feed(report)
+        try:
+            while not self._stop.is_set():
+                try:
+                    report = handle.read(64, 1000)
+                except (OSError, ValueError):
+                    if not self._stop.is_set():
+                        self.lost = True
+                    return
+                if report and not self._stop.is_set():
+                    self.feed(report)
+        finally:
+            _close_all([handle])
 
     def feed(self, report: Sequence[int]) -> None:
         changes: Dict[str, object] = {}

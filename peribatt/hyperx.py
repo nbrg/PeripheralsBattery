@@ -47,6 +47,15 @@ _BASE = bytes([0x06, 0x00, 0x02, 0x00, 0x9A, 0x00, 0x00, 0x68,
                0x4A, 0x8E, 0x0A, 0x00, 0x00, 0x00, MAGIC])
 
 MISSED_POLLS_OFFLINE = 2
+READ_MS = 1000              # reader wake-up interval; also how soon a closed handle is released
+
+
+def _close_all(handles) -> None:
+    for h in handles:
+        try:
+            h.close()
+        except Exception:
+            pass
 
 
 def packet(cmd: int, payload: int = 0) -> bytes:
@@ -159,23 +168,25 @@ class HyperXSource:
     def close(self):
         self._stop.set()
         handles, self._handles, self._writer = self._handles, [], None
-        for h in handles:
-            try:
-                h.close()
-            except Exception:
-                pass
+        if not self.threaded:
+            _close_all(handles)
+        # Threaded: each reader closes its own handle once its read returns. Closing a
+        # handle while another thread is inside hid_read on it can crash the process.
 
     def _reader(self, handle, stop: threading.Event):
-        while not stop.is_set():
-            try:
-                report = handle.read(64, 5000)     # blocks; wakes only for data
-            except (OSError, ValueError) as e:
-                if not stop.is_set():
-                    log.info("hyperx reader stopped: %s", e)
-                    self._lost()
-                return
-            if report:
-                self.feed(report)
+        try:
+            while not stop.is_set():
+                try:
+                    report = handle.read(64, READ_MS)
+                except (OSError, ValueError) as e:
+                    if not stop.is_set():
+                        log.info("hyperx reader stopped: %s", e)
+                        self._lost()
+                    return
+                if report and not stop.is_set():
+                    self.feed(report)
+        finally:
+            _close_all([handle])
 
     def _lost(self):
         with self._lock:
