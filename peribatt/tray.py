@@ -9,7 +9,7 @@ import sys
 import threading
 from typing import Dict
 
-from . import DISPLAY_NAME, __version__, winshell
+from . import DISPLAY_NAME, __version__, trayicon, winshell
 from .app import PLACEHOLDER, App
 from .config import app_dir
 from .model import HEADSET
@@ -35,7 +35,8 @@ class PystrayBackend:
 
     # -- Backend protocol -------------------------------------------------
     def show(self, key, image, title):
-        icon = self.pystray.Icon(f"peribatt-{len(self.icons)}", image, title, menu=self._menu(key))
+        icon = trayicon.make_icon(self.pystray, key, f"peribatt-{len(self.icons)}", image, title,
+                                  menu=self._menu(key))
 
         ready = threading.Event()
 
@@ -51,10 +52,17 @@ class PystrayBackend:
         with self._lock:
             self.icons[key] = icon
             self._ready[key] = ready
+        def run():
+            try:
+                icon.run(setup=setup)
+            finally:
+                release = getattr(icon, "release_handles", None)
+                if release is not None:
+                    release()                   # the icon's window is gone: free its images
+
         # Our own daemon thread (pystray's run_detached uses a non-daemon one): an icon
         # thread must never keep the process alive after Exit.
-        threading.Thread(target=icon.run, kwargs={"setup": setup}, daemon=True,
-                         name=f"tray-{key}").start()
+        threading.Thread(target=run, daemon=True, name=f"tray-{key}").start()
 
     def set_image(self, key, image, cache_key):
         icon = self.icons.get(key)

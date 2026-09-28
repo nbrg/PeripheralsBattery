@@ -84,3 +84,39 @@ def test_real_tray_backend(tmp_path, caplog):
     while any(t.name.startswith("tray-") for t in threading.enumerate()) and time.time() < end:
         time.sleep(0.1)
     assert not [t.name for t in threading.enumerate() if t.name.startswith("tray-")]
+
+
+def test_icons_are_built_in_memory_with_stable_ids(tmp_path):
+    """The real Win32 icon path: no temp .ico files, a stable id, one handle per frame."""
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from peribatt import style, trayicon
+    from peribatt.app import App
+    from peribatt.config import Store
+    from peribatt.model import HEADSET, Reading
+    from peribatt.render import render
+    from peribatt.tray import PystrayBackend
+
+    h = trayicon.create_hicon(render(32, HEADSET, 60, style.WHITE))
+    assert h
+    trayicon.destroy_hicon(h)
+
+    before = set(Path(tempfile.gettempdir()).glob("*.ico"))
+    backend = PystrayBackend(16)
+    app = App(Store(tmp_path / "settings.json"), backend)
+    backend.app = app
+    app.apply([Reading("hx", "Headset", HEADSET, 50)])
+    time.sleep(1.0)
+    icon = backend.icons["hx"]
+    assert icon._pb_uid == trayicon.icon_uid("hx")
+    frames = [render(16, HEADSET, 50, c) for c in (style.WHITE, style.GREY)]
+    for _ in range(10):                                   # a mute blink
+        for f in frames:
+            backend.set_image("hx", f, ())
+    time.sleep(0.5)
+    assert icon._pb_handles.made <= 4                     # the two frames, plus the first image
+    assert set(Path(tempfile.gettempdir()).glob("*.ico")) - before == set()
+    for key in list(backend.icons):
+        backend.remove(key)
