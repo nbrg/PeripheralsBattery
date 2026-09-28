@@ -78,3 +78,9 @@ def test_real_tray_backend(tmp_path, caplog):
         for key in list(backend.icons):
             backend.remove(key)
     assert "could not" not in caplog.text and "Traceback" not in caplog.text
+    # every icon thread ends - including the "searching" icon, removed right after it was made
+    import threading
+    end = time.time() + 10
+    while any(t.name.startswith("tray-") for t in threading.enumerate()) and time.time() < end:
+        time.sleep(0.1)
+    assert not [t.name for t in threading.enumerate() if t.name.startswith("tray-")]

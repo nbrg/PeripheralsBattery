@@ -150,14 +150,14 @@ class WebUi:
 
     def __init__(self, app=None, api=None, is_supported: Callable[[int, int], bool] = lambda v, p: False,
                  on_recipe_saved: Optional[Callable[[dict], None]] = None,
-                 recipes_path: Optional[Path] = None, opener: Callable[[str], None] = open_window,
+                 recipes_path: Optional[Path] = None, opener: Optional[Callable[[str], None]] = None,
                  idle_seconds: float = IDLE_SECONDS, set_autostart=None, autostart_enabled=None):
         self.app = app
         self.api = api or HidApi()
         self.is_supported = is_supported
         self.on_recipe_saved = on_recipe_saved
         self.recipes_path = recipes_path or (app_dir() / "recipes.json")
-        self.opener = opener
+        self.opener = opener or (lambda url: open_window(url))   # looked up when used
         self.idle_seconds = idle_seconds
         self.set_autostart = set_autostart
         self.autostart_enabled = autostart_enabled

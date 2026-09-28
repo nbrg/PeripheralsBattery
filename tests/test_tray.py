@@ -149,6 +149,9 @@ def test_whole_app_starts_and_exits_from_the_menu(fake_pystray, monkeypatch):
     monkeypatch.setattr(winshell, "set_autostart", autostart.append)
     monkeypatch.setattr(winshell, "single_instance", lambda: True)
     monkeypatch.setattr(winshell, "tray_icon_size", lambda: 24)
+    from peribatt import web
+    windows = []
+    monkeypatch.setattr(web, "open_window", windows.append)      # never a real browser in tests
     result = {}
     t = threading.Thread(target=lambda: result.setdefault("rc", main([])), daemon=True)
     t.start()
@@ -159,6 +162,7 @@ def test_whole_app_starts_and_exits_from_the_menu(fake_pystray, monkeypatch):
     placeholder = FakeIcon.all[0]
     assert placeholder.title.startswith("Peripherals Battery:")          # searching / nothing found
     assert placeholder.notes and "^" in placeholder.notes[0][1]          # first-launch welcome
+    assert windows and windows[0].startswith("http://127.0.0.1:")      # ...and the settings window
     find(placeholder.menu, "Exit").action()
     t.join(10)
     assert result.get("rc") == 0 and placeholder.stopped

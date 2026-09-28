@@ -30,11 +30,14 @@ class PystrayBackend:
         self.icon_size = icon_size
         self.app: App = None                 # set by run()
         self.icons: Dict[str, object] = {}
+        self._ready: Dict[str, threading.Event] = {}
         self._lock = threading.Lock()
 
     # -- Backend protocol -------------------------------------------------
     def show(self, key, image, title):
         icon = self.pystray.Icon(f"peribatt-{len(self.icons)}", image, title, menu=self._menu(key))
+
+        ready = threading.Event()
 
         def setup(ic):
             try:
@@ -42,13 +45,16 @@ class PystrayBackend:
                 log.info("tray icon shown: %s", key)
             except Exception:
                 log.exception("could not show the tray icon for %s", key)
+            finally:
+                ready.set()
 
         with self._lock:
             self.icons[key] = icon
-        if sys.platform == "win32":
-            icon.run_detached(setup=setup)
-        else:
-            threading.Thread(target=icon.run, kwargs={"setup": setup}, daemon=True).start()
+            self._ready[key] = ready
+        # Our own daemon thread (pystray's run_detached uses a non-daemon one): an icon
+        # thread must never keep the process alive after Exit.
+        threading.Thread(target=icon.run, kwargs={"setup": setup}, daemon=True,
+                         name=f"tray-{key}").start()
 
     def set_image(self, key, image, cache_key):
         icon = self.icons.get(key)
@@ -69,7 +75,13 @@ class PystrayBackend:
     def remove(self, key):
         with self._lock:
             icon = self.icons.pop(key, None)
+            ready = self._ready.pop(key, None)
         if icon is not None:
+            # pystray ignores stop() until its loop is up: an icon removed right after
+            # it was created (the "searching" icon, when devices turn up fast) would
+            # otherwise stay in the tray with a thread that never ends.
+            if ready is not None and not ready.wait(5):
+                log.warning("tray icon %s did not start in time", key)
             try:
                 icon.stop()
             except Exception as e:

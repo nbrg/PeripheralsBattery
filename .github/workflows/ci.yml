@@ -20,6 +20,7 @@ jobs:
     # The settings UI (React + Fluent UI) is committed pre-built in peribatt/webui so
     # the app runs without Node; this checks that build matches its source.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,6 +42,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,13 +55,15 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install --with-deps chromium
-      - run: python -m pytest -q
+      - run: python -m pytest -q -p no:cacheprovider
+        timeout-minutes: 10
 
   build:
     # Every push builds and runs the packaged app. Publishing only happens for a pushed
     # v* tag, or a manual run with "release" ticked (the release then creates the tag).
     needs: [web, test]
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     env:
