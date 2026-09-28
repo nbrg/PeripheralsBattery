@@ -1,115 +1,38 @@
 [
-  {
-    "name": "SteelSeries Arctis Nova 7",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x2202", "0x2206", "0x220a", "0x223a", "0x227a", "0x22a4"],
-    "match": {"usage_page": "0xffc0"},
-    "steps": [
-      {"write": "00 b0", "read_len": 64,
-       "level": {"byte": 2, "max": 4},
-       "charging": {"byte": 3, "in": [1, 2]},
-       "offline": {"byte": 3, "in": [0]}}
-    ]
-  },
-  {
-    "name": "SteelSeries Arctis Nova 7",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x22a1", "0x227e", "0x2258", "0x229e", "0x22ad", "0x22a9", "0x22a5"],
-    "match": {"usage_page": "0xffc0"},
-    "steps": [
-      {"write": "00 b0", "read_len": 64,
-       "level": {"byte": 2},
-       "charging": {"byte": 3, "in": [1, 2]},
-       "offline": {"byte": 3, "in": [0]}}
-    ]
-  },
-  {
-    "name": "SteelSeries Arctis Nova 5",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x2232", "0x2253"],
-    "match": {"usage_page": "0xffc0"},
-    "steps": [
-      {"write": "00 b0", "read_len": 64,
-       "level": {"byte": 3},
-       "charging": {"byte": 4, "in": [1]},
-       "offline": {"byte": 1, "in": [2]}}
-    ]
-  },
-  {
-    "name": "SteelSeries Arctis 7",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x1260", "0x12ad", "0x1252", "0x1280"],
-    "match": {"interface": 5},
-    "steps": [
-      {"write": "06 18", "read_len": 8, "level": {"byte": 2}}
-    ]
-  },
-  {
-    "name": "SteelSeries Arctis 1 / 7X / 7P",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x12b3", "0x12b6", "0x12d7", "0x12d5"],
-    "match": {"interface": 3},
-    "steps": [
-      {"write": "06 12", "read_len": 8,
-       "level": {"byte": 3},
-       "offline": {"byte": 2, "in": [1]}}
-    ]
-  },
-  {
-    "name": "SteelSeries Arctis 9",
-    "kind": "headset",
-    "vendor_id": "0x1038",
-    "product_ids": ["0x12c2"],
-    "match": {"interface": 0},
-    "steps": [
-      {"write": "00 20", "read_len": 12,
-       "level": {"byte": 3, "min": 100, "max": 154},
-       "charging": {"byte": 4, "in": [1]}}
-    ]
-  },
-  {
-    "name": "Corsair Void",
-    "kind": "headset",
-    "vendor_id": "0x1b1c",
-    "product_ids": ["0x1b1c", "0x1b27", "0x0a14", "0x0a16", "0x0a17", "0x0a1d", "0x0a1a",
-                    "0x1b2a", "0x1b23", "0x1b29", "0x0a55", "0x0a51", "0x0a52", "0x0a38",
-                    "0x0a4f", "0x0a2b", "0x0a75", "0x0a56"],
-    "match": {"usage_page": "0xffc5"},
-    "steps": [
-      {"write": "c9 64", "read_len": 5,
-       "level": {"byte": 2, "mask": "0x7f"},
-       "charging": {"byte": 4, "in": [4, 5]},
-       "offline": {"byte": 4, "in": [0]}}
-    ]
-  },
-  {
-    "name": "HyperX Cloud II Wireless",
-    "kind": "headset",
-    "vendor_id": "0x03f0",
-    "product_ids": ["0x0696", "0x018b"],
-    "match": {"usage_page": "0xff90", "usage": "0x0303"},
-    "steps": [
-      {"write": "06 ff bb 02", "pad_to": 52, "expect": "06 ff bb 02", "read_len": 20,
-       "level": {"byte": 7}},
-      {"write": "06 ff bb 03", "pad_to": 52, "expect": "06 ff bb 03", "read_len": 20,
-       "charging": {"byte": 4, "in": [1]}}
-    ]
-  },
-  {
-    "name": "HyperX Cloud Alpha Wireless",
-    "kind": "headset",
-    "vendor_id": "0x03f0",
-    "product_ids": ["0x098d"],
-    "steps": [
-      {"write": "21 bb 0b", "pad_to": 31, "expect": "21 bb", "read_len": 31,
-       "level": {"byte": 3}},
-      {"write": "21 bb 0c", "pad_to": 31, "expect": "21 bb", "read_len": 31,
-       "charging": {"byte": 3, "in": [1]}}
-    ]
-  }
+  {"name": "SteelSeries Arctis Nova 7", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x2202", "0x2206", "0x220a", "0x223a", "0x227a", "0x22a4"], "match": {"usage_page": "0xffc0"}, "steps": [{"write": "00 b0", "read_len": 64, "level": {"byte": 2, "max": 4}, "charging": {"byte": 3, "in": [1, 2]}, "offline": {"byte": 3, "in": [0]}, "expect": "b0"}], "source": "HeadsetControl"},
+  {"name": "SteelSeries Arctis Nova 7", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x22a1", "0x227e", "0x2258", "0x229e", "0x22ad", "0x22a9", "0x22a5", "0x22a7", "0x2298"], "match": {"usage_page": "0xffc0"}, "steps": [{"write": "00 b0", "read_len": 64, "level": {"byte": 2}, "charging": {"byte": 3, "in": [1, 2]}, "offline": {"byte": 3, "in": [0]}, "expect": "b0"}], "source": "HeadsetControl"},
+  {"name": "SteelSeries Arctis Nova 5", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x2232", "0x2253"], "match": {"usage_page": "0xffc0"}, "steps": [{"write": "00 b0", "read_len": 64, "level": {"byte": 3}, "charging": {"byte": 4, "in": [1]}, "offline": {"byte": 1, "in": [2]}, "expect": "b0"}]},
+  {"name": "SteelSeries Arctis 7", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x1260", "0x12ad", "0x1252", "0x1280"], "match": {"interface": 5}, "steps": [{"write": "06 18", "read_len": 8, "level": {"byte": 2}}]},
+  {"name": "SteelSeries Arctis 1 / 7X / 7P", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x12b3", "0x12b6", "0x12d7", "0x12d5"], "match": {"interface": 3}, "steps": [{"write": "06 12", "read_len": 8, "level": {"byte": 3}, "offline": {"byte": 2, "in": [1]}}]},
+  {"name": "SteelSeries Arctis 9", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x12c2"], "match": {"interface": 0}, "steps": [{"write": "00 20", "read_len": 12, "level": {"byte": 3, "min": 100, "max": 154}, "charging": {"byte": 4, "in": [1]}}]},
+  {"name": "Corsair Void", "kind": "headset", "vendor_id": "0x1b1c", "product_ids": ["0x1b1c", "0x1b27", "0x0a14", "0x0a16", "0x0a17", "0x0a1d", "0x0a1a", "0x1b2a", "0x1b23", "0x1b29", "0x0a55", "0x0a51", "0x0a52", "0x0a38", "0x0a4f", "0x0a2b", "0x0a75", "0x0a56"], "match": {"usage_page": "0xffc5"}, "steps": [{"write": "c9 64", "read_len": 5, "level": {"byte": 2, "mask": "0x7f"}, "charging": {"byte": 4, "in": [4, 5]}, "offline": {"byte": 4, "in": [0]}}]},
+  {"name": "HyperX Cloud II Wireless", "kind": "headset", "vendor_id": "0x03f0", "product_ids": ["0x0696", "0x018b"], "match": {"usage_page": "0xff90", "usage": "0x0303"}, "steps": [{"write": "06 ff bb 02", "pad_to": 52, "expect": "06 ff bb 02", "read_len": 20, "level": {"byte": 7}}, {"write": "06 ff bb 03", "pad_to": 52, "expect": "06 ff bb 03", "read_len": 20, "charging": {"byte": 4, "in": [1]}}]},
+  {"name": "HyperX Cloud Alpha Wireless", "kind": "headset", "vendor_id": "0x03f0", "product_ids": ["0x098d"], "steps": [{"write": "21 bb 0b", "pad_to": 31, "expect": "21 bb", "read_len": 31, "level": {"byte": 3}}, {"write": "21 bb 0c", "pad_to": 31, "expect": "21 bb", "read_len": 31, "charging": {"byte": 3, "in": [1]}}]},
+  {"name": "SteelSeries Arctis Nova 3P / 3X Wireless", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x2269", "0x226d"], "names": {"0x2269": "SteelSeries Arctis Nova 3P Wireless", "0x226d": "SteelSeries Arctis Nova 3X Wireless"}, "match": {"usage_page": "0xffc0"}, "source": "HeadsetControl", "steps": [{"write": "00 b0", "expect": "b0", "level": {"byte": 3}, "charging": {"byte": 4, "in": [1]}, "offline": {"byte": 1, "in": [2]}}]},
+  {"name": "SteelSeries Arctis 7+", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x220e", "0x2212", "0x2216", "0x2236"], "match": {"usage_page": "0xffc0"}, "source": "HeadsetControl", "steps": [{"write": "00 b0", "expect": "b0", "level": {"byte": 2, "max": 4}, "charging": {"byte": 3, "in": [1]}, "offline": {"byte": 1, "in": [1]}}]},
+  {"name": "SteelSeries Arctis Nova Pro Wireless", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x12e0", "0x12e5"], "names": {"0x12e5": "SteelSeries Arctis Nova Pro Wireless X"}, "match": {"interface": [3, 4]}, "source": "HeadsetControl", "steps": [{"write": "06 b0", "require": [{"byte": 15, "in": [1, 2, 8]}], "level": {"byte": 6, "max": 8}, "charging": {"byte": 15, "in": [2]}, "offline": {"byte": 15, "in": [1]}}]},
+  {"name": "SteelSeries Arctis Pro Wireless", "kind": "headset", "vendor_id": "0x1038", "product_ids": ["0x1290"], "match": {"interface": 0}, "source": "HeadsetControl", "steps": [{"write": "41 aa", "pad_to": 31, "require": [{"byte": 0, "in": [2, 4]}], "offline": {"byte": 0, "in": [2]}}, {"write": "40 aa", "pad_to": 31, "level": {"byte": 0, "max": 4}}]},
+  {"name": "SteelSeries Aerox Wireless", "kind": "mouse", "vendor_id": "0x1038", "product_ids": ["0x1838", "0x1878", "0x1852", "0x185c", "0x1860", "0x1858", "0x1874"], "names": {"0x1838": "SteelSeries Aerox 3 Wireless", "0x1878": "SteelSeries Aerox 3 Wireless", "0x1852": "SteelSeries Aerox 5 Wireless", "0x185c": "SteelSeries Aerox 5 Wireless", "0x1860": "SteelSeries Aerox 5 Wireless", "0x1858": "SteelSeries Aerox 9 Wireless", "0x1874": "SteelSeries Aerox 9 Wireless"}, "match": {"usage_page": "0xffc0", "interface": 3}, "source": "alloyctl, rivalcfg, steel-mouse", "steps": [{"write": "00 d2", "pad_to": 65, "anchor": true, "expect": "d2", "tries": 3, "timeout_ms": 300, "level": {"byte": 1, "mask": "0x7f", "steps": 21, "steps_from": 1}, "charging": {"byte": 1, "mask": "0x80", "in": [128]}, "offline": {"byte": 1, "mask": "0x7f", "in": [0]}}]},
+  {"name": "Corsair wireless headset", "kind": "headset", "vendor_id": "0x1b1c", "product_ids": ["0x2a08", "0x2a02", "0x0a97"], "names": {"0x2a08": "Corsair Void v2 Wireless", "0x2a02": "Corsair Virtuoso Max Wireless", "0x0a97": "Corsair HS80 Max Wireless"}, "match": {"interface": 4}, "source": "HeadsetControl (corsair_void_v2w)", "steps": [{"write": "00 02 08 02 13", "pad_to": 65, "receive": "none"}, {"write": "00 02 08 02 12", "pad_to": 65, "receive": "none"}, {"write": "00 02 09 02 12", "pad_to": 65, "timeout_ms": 500}, {"write": "00 02 09 02 0f", "pad_to": 65, "tries": 3, "timeout_ms": 500, "level": {"byte": 4, "bytes": 2, "min": 1, "max": 1000}}]},
+  {"name": "Astro A50 Gen 5", "kind": "headset", "vendor_id": "0x046d", "product_ids": ["0x0b1c"], "match": {"usage_page": "0xff32", "usage": "0x0074"}, "source": "HeadsetControl (logitech_astro_a50)", "steps": [{"write": "02 0c 03 00 06 0c", "pad_to": 64, "expect": "02 0c", "require": [{"byte": 4, "in": [6]}], "level": {"byte": 6}, "charging": {"byte": 8}}]},
+  {"name": "Audeze Maxwell", "kind": "headset", "vendor_id": "0x3329", "product_ids": ["0x4b19", "0x4b18", "0x4b1a", "0x4b1e", "0x4b29", "0x4b28"], "names": {"0x4b29": "Audeze Maxwell 2", "0x4b28": "Audeze Maxwell 2"}, "match": {"usage_page": "0xff13", "usage": "0x0001"}, "off_when_named": ["dongle"], "source": "HeadsetControl (audeze_maxwell)", "steps": [{"write": "06 07 80 05 5a 03 00 d6 0c", "pad_to": 62, "anchor": true, "expect": "d6 0c 00 00", "timeout_ms": 1500, "level": {"byte": 4}}]},
+  {"name": "JBL Quantum 910 Wireless", "kind": "headset", "vendor_id": "0x0ecb", "product_ids": ["0x2088"], "match": {"usage_page": "0xff13", "usage": "0x0001"}, "source": "plugato/JBL_Baterry_Monitor", "listen": [{"expect": "08", "level": {"byte": 1}}]},
+  {"name": "Keychron (Ultra-Link receiver)", "kind": "keyboard", "vendor_id": "0x3434", "product_ids": ["0xd028", "0xd048"], "names": {"0xd028": "Keychron (Ultra-Link 8K)", "0xd048": "Keychron M5"}, "match": {"interface": 4}, "source": "csutcliff/keychron-battery-dkms", "steps": [{"write": "b3 06", "pad_to": 64, "send": "feature", "receive": "input", "expect": "b4 06", "tries": 3, "timeout_ms": 500, "level": {"byte": 20}}]},
+  {"name": "Lofree Hyzen", "kind": "keyboard", "vendor_id": "0x388d", "product_ids": ["0x0025"], "match": {"usage_page": "0xff1c", "usage": "0x0092"}, "source": "Lofree web driver", "steps": [{"write": "04 00 00 01", "pad_to": 32, "expect": "04", "timeout_ms": 3000, "require": [{"byte": 3, "in": [1]}]}, {"write": "04 00 00 aa", "pad_to": 32, "expect": "04", "timeout_ms": 3000, "require": [{"byte": 3, "in": [0, 170]}], "offline": {"byte": 8, "in": [0]}}, {"write": "04 00 00 1a", "pad_to": 32, "expect": "04", "timeout_ms": 3000, "require": [{"byte": 3, "in": [0, 26]}], "level": {"byte": 8}}, {"write": "04 00 00 02", "pad_to": 32, "receive": "none"}]},
+  {"name": "Pulsar / ATK / VXE mouse", "kind": "mouse", "vendor_id": "0x3554", "product_ids": ["0xf508", "0xf507", "0xf58f", "0xf58a", "0xf58c"], "names": {"0xf508": "Pulsar X2 V2 Mini", "0xf507": "Pulsar X2 V2 Mini", "0xf58f": "ATK VXE R1 SE+", "0xf58a": "VXE R1 Pro Max", "0xf58c": "VXE R1 Pro Max"}, "match": {"interface": 1}, "source": "python-pulsar-mouse-tool, OpenMouse", "steps": [{"write": "08 04", "pad_to": 16, "checksum": {"at": 16, "over": [0, 16], "base": "0x55"}, "expect": "08 04", "verify_checksum": true, "tries": 4, "timeout_ms": 250, "level": {"byte": 6}, "charging": {"byte": 7, "in": [1]}}]},
+  {"name": "ATK VXE R1 SE+", "kind": "mouse", "vendor_id": "0x373b", "product_ids": ["0x1085"], "match": {"interface": 1}, "source": "python-pulsar-mouse-tool", "steps": [{"write": "08 04", "pad_to": 16, "checksum": {"at": 16, "over": [0, 16], "base": "0x55"}, "expect": "08 04", "verify_checksum": true, "tries": 4, "timeout_ms": 250, "level": {"byte": 6}, "charging": {"byte": 7, "in": [1]}}]},
+  {"name": "ASUS ROG mouse", "kind": "mouse", "vendor_id": "0x0b05", "product_ids": ["0x1a72", "0x1a70", "0x1b0c", "0x1b0a", "0x197f", "0x197d", "0x1a1a", "0x1a18", "0x1a94", "0x1a92", "0x1a68", "0x1a66", "0x1979", "0x1977", "0x19f4", "0x1a8d", "0x1af5", "0x1af3", "0x1c57", "0x1c56"], "names": {"0x1a72": "ROG Gladius III Aimpoint", "0x1a70": "ROG Gladius III Aimpoint", "0x1b0c": "ROG Gladius III Eva 2", "0x1b0a": "ROG Gladius III Eva 2", "0x197f": "ROG Gladius III Wireless", "0x197d": "ROG Gladius III Wireless", "0x1a1a": "ROG Chakram X", "0x1a18": "ROG Chakram X", "0x1a94": "ROG Harpe Ace Aim Lab Edition", "0x1a92": "ROG Harpe Ace Aim Lab Edition", "0x1a68": "ROG Keris Wireless Aimpoint", "0x1a66": "ROG Keris Wireless Aimpoint", "0x1979": "ROG Spatha X", "0x1977": "ROG Spatha X", "0x19f4": "TUF Gaming M4 Wireless", "0x1a8d": "TX Gaming Mouse", "0x1af5": "TX Gaming Mouse Mini", "0x1af3": "TX Gaming Mouse Mini", "0x1c57": "TUF Gaming Mini Miku Edition", "0x1c56": "TUF Gaming Mini Miku Edition"}, "match": {"interface": 0}, "source": "G-Helper", "steps": [{"write": "00 12 07", "pad_to": 65, "anchor": true, "expect": "12 07", "tries": 3, "timeout_ms": 300, "level": {"byte": 4, "max": 100}, "charging": {"byte": 9}, "offline": {"byte": 4, "in": [0]}}]},
+  {"name": "ASUS ROG mouse", "kind": "mouse", "vendor_id": "0x0b05", "product_ids": ["0x18e5", "0x18e3", "0x1960", "0x195e", "0x1a59", "0x1a57", "0x1908", "0x1906", "0x1949", "0x1947"], "names": {"0x18e5": "ROG Chakram", "0x18e3": "ROG Chakram", "0x1960": "ROG Keris Wireless", "0x195e": "ROG Keris Wireless", "0x1a59": "ROG Keris EVA Edition", "0x1a57": "ROG Keris EVA Edition", "0x1908": "ROG Pugio II", "0x1906": "ROG Pugio II", "0x1949": "ROG Strix Impact II Wireless", "0x1947": "ROG Strix Impact II Wireless"}, "match": {"interface": 0}, "source": "G-Helper", "steps": [{"write": "00 12 07", "pad_to": 65, "anchor": true, "expect": "12 07", "tries": 3, "timeout_ms": 300, "level": {"byte": 4, "max": 4}, "charging": {"byte": 9}, "offline": {"byte": 4, "in": [0]}}]},
+  {"name": "G-Wolves mouse", "kind": "mouse", "vendor_id": "0x33e4", "product_ids": ["0x3854", "0x5418", "0x5419", "0x5219", "0x4718", "0x4719", "0x5618", "0x5619", "0x3619", "0x3519", "0x2719", "0x4219"], "names": {"0x5418": "G-Wolves HTS Plus", "0x5419": "G-Wolves HTS Plus", "0x5219": "G-Wolves HTS Plus Pro", "0x4718": "G-Wolves Lycan", "0x4719": "G-Wolves Lycan", "0x5618": "G-Wolves HTXU", "0x5619": "G-Wolves HTXU", "0x3619": "G-Wolves Fenrir Pro", "0x3519": "G-Wolves Fenrir Asym", "0x2719": "G-Wolves HTX Mini", "0x4219": "G-Wolves WARG"}, "source": "G-Wolves web driver (mouse.xyz)", "steps": [{"write": "00 00 02 02 00 83", "pad_to": 65, "send": "feature", "receive": "feature", "read_len": 65, "tries": 10, "delay_ms": 50, "anchor": true, "expect": "02 02 00 83", "require": [{"byte": -2, "in": [161, 162]}], "charging": {"byte": 4, "in": [1]}, "level": {"byte": 5}}]},
+  {"name": "LAMZU Maya X", "kind": "mouse", "vendor_id": "0x373e", "product_ids": ["0x001e", "0x001c"], "match": {"interface": 2, "usage_page": "0xffff"}, "source": "lamzu-battery-monitory", "steps": [{"write": "00 00 02 02 00 83", "pad_to": 65, "send": "feature", "receive": "feature", "read_len": 65, "tries": 10, "delay_ms": 50, "anchor": true, "expect": "02 02 00 83", "require": [{"byte": -2, "in": [161, 162]}], "charging": {"byte": 4, "in": [1]}, "level": {"byte": 5}}]},
+  {"name": "WLmouse", "kind": "mouse", "vendor_id": "0x36a7", "product_ids": ["0xa887", "0xa868", "0xa880"], "names": {"0xa887": "WLmouse Beast X", "0xa868": "WLmouse Beast X Mini Pro", "0xa880": "WLmouse Beast X Max"}, "source": "mouse-battery-tray", "steps": [{"write": "00 00 02 02 00 83", "pad_to": 65, "send": "feature", "receive": "feature", "read_len": 65, "tries": 10, "delay_ms": 50, "anchor": true, "expect": "02 02 00 83", "require": [{"byte": -2, "in": [161, 162]}], "charging": {"byte": 4, "in": [1]}, "level": {"byte": 5}}]},
+  {"name": "MCHOSE mouse", "kind": "mouse", "vendor_id": "0x5253", "product_ids": "any", "names": {"0x0031": "MCHOSE M7 Ultra", "0x1020": "MCHOSE M7 Ultra"}, "match": {"usage_page": "0xff01"}, "source": "mchose-linux (PROTOCOL.md)", "steps": [{"write": "12 f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff", "send": "feature", "receive": "feature", "read_len": 65, "tries": 4, "delay_ms": 120, "expect": ["12 f9 ac ad", "12 f9 c8 c7"], "level": {"byte": 11, "xor": "0xff"}, "charging": {"byte": 12, "xor": "0xff", "in": [1]}}, {"write": "11 f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff", "send": "feature", "receive": "feature", "read_len": 21, "tries": 4, "delay_ms": 120, "expect": ["11 f9 ac ad", "11 f9 c8 c7"], "if_missing": "level", "level": {"byte": 11, "xor": "0xff"}, "charging": {"byte": 12, "xor": "0xff", "in": [1]}}]},
+  {"name": "MCHOSE mouse", "kind": "mouse", "vendor_id": "0x3837", "product_ids": "any", "match": {"usage_page": "0xff01"}, "source": "mchose-linux (PROTOCOL.md)", "steps": [{"write": "12 f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff", "send": "feature", "receive": "feature", "read_len": 65, "tries": 4, "delay_ms": 120, "expect": ["12 f9 ac ad", "12 f9 c8 c7"], "level": {"byte": 11, "xor": "0xff"}, "charging": {"byte": 12, "xor": "0xff", "in": [1]}}, {"write": "11 f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff", "send": "feature", "receive": "feature", "read_len": 21, "tries": 4, "delay_ms": 120, "expect": ["11 f9 ac ad", "11 f9 c8 c7"], "if_missing": "level", "level": {"byte": 11, "xor": "0xff"}, "charging": {"byte": 12, "xor": "0xff", "in": [1]}}]},
+  {"name": "MCHOSE G7", "kind": "mouse", "vendor_id": "0xa8a5", "product_ids": ["0x2255"], "match": {"usage_page": "0xff01", "usage": "0x0010"}, "source": "HaloBattery issue #8", "steps": [{"write": "00 55 30 a5 0b 2e 01 01 01", "pad_to": 65, "expect": "aa 30", "timeout_ms": 500, "level": {"byte": 8}, "charging": {"byte": 9}}]},
+  {"name": "Razer Barracuda Pro", "kind": "headset", "vendor_id": "0x1532", "product_ids": ["0x053a"], "match": {"usage_page": ["0xff00", "0xff14"]}, "source": "USBPcap capture of Razer Synapse", "steps": [{"write": "01 80 07 50 41 0e 08 02 e1 01", "pad_to": 64, "timeout_ms": 300}, {"write": "01 80 08 50 41 08 08 03 21", "pad_to": 64, "expect": "21 01", "expect_at": 13, "tries": 4, "timeout_ms": 150, "level": {"byte": 16}}, {"write": "01 80 08 50 41 08 08 03 2a", "pad_to": 64, "expect": "2a 01", "expect_at": 13, "tries": 4, "timeout_ms": 150, "charging": {"byte": 16}}]},
+  {"name": "Razer BlackShark V2 Pro", "kind": "headset", "vendor_id": "0x1532", "product_ids": ["0x0555", "0x0556"], "match": {"usage_page": "0xff00"}, "source": "OpenRazer (razerblackshark_driver)", "steps": [{"write": "02 80 07 00 00 50 41 0e 00 02 e1 01", "pad_to": 64, "receive": "none", "delay_ms": 100}, {"write": "02 80 07 00 00 50 41 0e 00 02 e1 01", "pad_to": 64, "timeout_ms": 300}, {"write": "02 80 08 00 00 50 41 08 00 03 21", "pad_to": 64, "expect": "21 01", "expect_at": 12, "tries": 4, "timeout_ms": 150, "level": {"byte": 15}}, {"write": "02 80 08 00 00 50 41 08 00 03 2a", "pad_to": 64, "expect": "2a 01", "expect_at": 12, "tries": 4, "timeout_ms": 150, "charging": {"byte": 15}}]},
+  {"name": "HyperX Cloud III Wireless", "kind": "headset", "vendor_id": "0x03f0", "product_ids": ["0x05b7", "0x0c9d"], "match": {"usage_page": "0xff13", "usage": "0x0001"}, "source": "HyperHeadset (cloud_iii_wireless)", "steps": [{"write": "66 89", "pad_to": 62, "expect": ["66 89", "66 0d"], "level": {"byte": 4}}, {"write": "66 8a", "pad_to": 62, "expect": ["66 8a", "66 0c"], "charging": {"byte": 2, "in": [1, 2]}}]},
+  {"name": "DualShock 4", "kind": "gamepad", "vendor_id": "0x054c", "product_ids": ["0x05c4", "0x09cc", "0x0ba0"], "source": "Linux hid-sony, DS4Windows", "steps": [{"expect": "01", "timeout_ms": 300, "read_len": 64, "level": {"byte": 30, "mask": "0x0f", "max": 10, "clamp": true}, "charging": {"byte": 30, "mask": "0x10", "in": [16]}}, {"expect": "11", "timeout_ms": 300, "read_len": 78, "if_missing": "level", "level": {"byte": 32, "mask": "0x0f", "max": 10, "clamp": true}, "charging": {"byte": 32, "mask": "0x10", "in": [16]}}]},
+  {"name": "DualSense", "kind": "gamepad", "vendor_id": "0x054c", "product_ids": ["0x0ce6", "0x0df2"], "names": {"0x0df2": "DualSense Edge"}, "source": "Linux hid-playstation", "steps": [{"expect": "01", "timeout_ms": 300, "read_len": 64, "level": {"byte": 53, "mask": "0x0f", "max": 10, "clamp": true}, "charging": {"byte": 53, "mask": "0xf0", "shift": 4, "in": [1, 2]}}, {"expect": "31", "timeout_ms": 300, "read_len": 78, "if_missing": "level", "level": {"byte": 54, "mask": "0x0f", "max": 10, "clamp": true}, "charging": {"byte": 54, "mask": "0xf0", "shift": 4, "in": [1, 2]}}]},
+  {"name": "Switch Pro Controller", "kind": "gamepad", "vendor_id": "0x057e", "product_ids": ["0x2009", "0x2006", "0x2007"], "names": {"0x2006": "Joy-Con (L)", "0x2007": "Joy-Con (R)"}, "match": {"bluetooth": true}, "source": "SDL (SDL_hidapi_switch.c), dekuNukem's notes", "steps": [{"expect": "30", "timeout_ms": 300, "level": {"byte": 2, "mask": "0xe0", "shift": 5, "max": 4}, "charging": {"byte": 2, "mask": "0x10", "in": [16]}}, {"write": "01 00 00 01 40 40 00 01 40 40 02", "pad_to": 49, "expect": "21", "if_missing": "level", "timeout_ms": 500, "level": {"byte": 2, "mask": "0xe0", "shift": 5, "max": 4}, "charging": {"byte": 2, "mask": "0x10", "in": [16]}}]}
 ]

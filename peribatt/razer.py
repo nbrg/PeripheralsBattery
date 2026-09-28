@@ -99,8 +99,9 @@ def guess_kind(name: str) -> str:
 class RazerSource:
     name = "razer"
 
-    def __init__(self, api=None, sleep: Callable[[float], None] = time.sleep):
+    def __init__(self, api=None, sleep: Callable[[float], None] = time.sleep, skip=frozenset()):
         self.api = api or HidApi()
+        self.skip = set(skip)          # product ids another source reads (the "PA" headsets)
         self.sleep = sleep
         self.working: Dict[int, Tuple[int, int]] = {}   # pid -> (collection #, tid)
         self.unsupported: set = set()
@@ -142,7 +143,7 @@ class RazerSource:
             by_pid.setdefault(d["product_id"], []).append(d)
         out: List[Reading] = []
         for pid, infos in by_pid.items():
-            if pid in self.unsupported:
+            if pid in self.unsupported or pid in self.skip:
                 continue
             infos.sort(key=lambda d: (d.get("interface_number", 0), d.get("usage_page", 0)))
             self.paths[pid] = [d["path"] for d in infos]

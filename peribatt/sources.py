@@ -72,7 +72,7 @@ def build_sources(store: Store, on_change: Optional[Callable[[Reading], None]] =
     return [
         LogitechSource(api=api, known=store.logitech_slots),
         HyperXSource(api=api, on_change=on_change),
-        RazerSource(api=api),
+        RazerSource(api=api, skip={pid for vid, pid in recipes.claimed if vid == 0x1532}),
         recipes,
         Throttled(Switchable(BluetoothSource(), lambda: store["bluetooth"]), 120),
         Switchable(XInputSource(), lambda: store["xinput"]),
@@ -85,9 +85,11 @@ def supported_check(sources) -> Callable[[int, int], bool]:
     from .hidpp import LOGITECH_VID
     from .razer import RAZER_VID
     claimed = {(HYPERX_VID, pid) for pid in HYPERX_PRODUCTS}
+    vendors = {LOGITECH_VID, RAZER_VID}
     for s in sources:
         claimed |= getattr(s, "claimed", set())
-    return lambda vid, pid: vid in (LOGITECH_VID, RAZER_VID) or (vid, pid) in claimed
+        vendors |= getattr(s, "claimed_vendors", set())
+    return lambda vid, pid: vid in vendors or (vid, pid) in claimed
 
 
 def reload_recipes(sources) -> None:

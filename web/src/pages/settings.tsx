@@ -254,7 +254,7 @@ export function SourcesPage({ state, save }: { state: State; save: Save }) {
     <>
       <PageHeader title="Sources" description="Where battery levels come from." />
       <div className={st.stack}>
-        <Section title="Built in" description="Logitech, Razer, HyperX, SteelSeries and Corsair are always on.">
+        <Section title="Built in" description="Logitech, Razer, HyperX, SteelSeries, Corsair, Astro, Audeze, JBL, ASUS, Pulsar, Keychron, PlayStation, Switch and more are always on.">
           <Toggle s={s} save={save} k="bluetooth" title="Bluetooth devices"
                   description="Anything Windows shows a battery for: keyboards like the Keychron K8 Pro, earbuds, headphones." />
           <Toggle s={s} save={save} k="xinput" title="Xbox-compatible controllers"

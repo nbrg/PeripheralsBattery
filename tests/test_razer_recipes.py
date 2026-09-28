@@ -88,7 +88,8 @@ def test_bundled_recipes_all_parse():
     names = {r.name for r in loaded}
     assert {"SteelSeries Arctis Nova 7", "Corsair Void", "HyperX Cloud II Wireless"} <= names
     for r in loaded:
-        assert r.steps and r.product_ids
+        assert r.steps or r.listen
+        assert r.product_ids or r.any_product
 
 
 def test_field_scaling_and_flags():

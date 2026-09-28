@@ -62,15 +62,23 @@ All thresholds can be changed in `settings.json`.
 
 | Family | How it is read | Examples |
 |---|---|---|
-| Logitech (LIGHTSPEED, Unifying, Bolt, USB cable) | HID++ 2.0 battery features 0x1000 / 0x1001 / 0x1004 | **G PRO Wireless**, G305, G502 LIGHTSPEED, G703/G903, MX Master, G915 |
+| Logitech mice & keyboards (LIGHTSPEED, Unifying, Bolt, USB cable) | HID++ 2.0 battery features 0x1000 / 0x1001 / 0x1004 | **G PRO Wireless**, G305, G502 LIGHTSPEED, G703/G903, MX Master, G915 |
+| Logitech headsets | HID++ 0x1F20 (battery voltage) | G533, G535, G633, G635, G733, G933, G935, G PRO / PRO X / PRO X 2 |
+| Astro | recipe | A50 Gen 5 base station |
 | HyperX, Kingston dongle | vendor protocol, including mute and charging reports | **Cloud Flight S**, Cloud II Wireless (0951:1718) |
-| HyperX, HP dongle | recipe | Cloud II Wireless (03F0:0696/018B), Cloud Alpha Wireless |
-| Razer (HyperSpeed / Pro dongles) | Razer 90-byte feature report, transaction id auto-detected | DeathAdder V3 Pro, Viper V2 Pro, Basilisk V3 Pro, BlackShark V2 Pro |
-| SteelSeries | recipes | Arctis 7 / Pro / 9 / 1 / 7X / 7P, Arctis Nova 5 / 7 |
-| Corsair | recipe | Void / Void Pro / Void Elite / HS70 Wireless |
-| **Any Bluetooth device** Windows knows the battery of | `DEVPKEY_Bluetooth_Battery` | **Keychron K8 Pro** and other BT keyboards, AirPods, Sony WH-/WF-, Turtle Beach BT headsets, MX Keys |
+| HyperX, HP dongle | recipes | Cloud II Wireless, Cloud Alpha Wireless, Cloud III Wireless |
+| Razer mice & headsets | Razer 90-byte feature report (transaction id auto-detected); the "PA" protocol for the newer headsets | DeathAdder V3 Pro, Viper V2 Pro, Basilisk V3 Pro, BlackShark V2 Pro (2023), Barracuda Pro |
+| SteelSeries | recipes | Arctis Nova 3P/3X/5/7/7P/Pro Wireless, Arctis 1/7/7+/9/Pro Wireless, Aerox 3/5/9 Wireless |
+| Corsair | recipes | Void / Void Pro / Void Elite / HS70, Void v2 Wireless, Virtuoso Max, HS80 Max |
+| Audeze | recipe | Maxwell, Maxwell 2 (dongle or USB-C) |
+| JBL | recipe (listens to the headset's own reports) | Quantum 910 Wireless |
+| Mice on vendor protocols | recipes | ASUS ROG / TUF (Gladius III, Keris, Chakram, Harpe…), Pulsar / ATK / VXE, G-Wolves, LAMZU Maya X, WLmouse Beast X, MCHOSE |
+| Keyboards on vendor dongles | recipes | Keychron Ultra-Link 8K receiver, Lofree Hyzen |
+| PlayStation controllers | the controller's own input report (listen only) | DualShock 4, DualSense, DualSense Edge - USB, and Bluetooth once a game or Steam has switched on the full report |
+| Nintendo Switch controllers | input report / "device info" subcommand, Bluetooth | Pro Controller, Joy-Con |
+| **Any Bluetooth device** Windows knows the battery of | `DEVPKEY_Bluetooth_Battery`, connection state and device class from the Bluetooth API | **Keychron K8 Pro** and other BT keyboards, AirPods, Sony WH-/WF-, Turtle Beach BT headsets, MX Keys |
 | Xbox-compatible controllers + their headsets | XInput (4 coarse levels) | Xbox pads, most 2.4 GHz third-party pads, Xbox headsets on a pad |
-| 100+ more headsets | optional [HeadsetControl](https://github.com/Sapd/HeadsetControl) bridge | Logitech G533/G935/PRO X, Roccat, Audeze, … |
+| 100+ more headsets | optional [HeadsetControl](https://github.com/Sapd/HeadsetControl) bridge | Roccat, … |
 
 > **Honesty note.** The protocols come from well-established open-source
 > implementations (see Credits) and are covered by protocol-level tests against
@@ -203,6 +211,14 @@ installer and attaches both to a GitHub release.
   curve: [Solaar](https://github.com/pwr-Solaar/Solaar).
 - Razer report format and the DPI / polling rate commands: [OpenRazer](https://github.com/openrazer/openrazer).
 - HyperX auto power-off and sidetone commands: [HyperHeadset](https://github.com/LennardKittner/HyperHeadset).
+- Many of the brand protocols were found through [HaloBattery](https://github.com/HeyOkay/HaloBattery)'s
+  notes, which point back to their origins: HeadsetControl (SteelSeries, Corsair, Astro, Audeze),
+  HyperHeadset (HyperX Cloud III), OpenRazer (BlackShark V2 Pro), G-Helper (ASUS),
+  python-pulsar-mouse-tool and OpenMouse (Pulsar/ATK/VXE), csutcliff/keychron-battery-dkms
+  (Keychron), mchose-linux (MCHOSE), lamzu-battery-monitory and mouse-battery-tray (LAMZU,
+  WLmouse), plugato/JBL_Baterry_Monitor (JBL), SDL and dekuNukem's notes (Switch), and the
+  Linux hid-sony / hid-playstation drivers (PlayStation). Here they are data - recipes in
+  `peribatt/recipes.json` - read by one engine, rather than one module per brand.
 
 ## License
 

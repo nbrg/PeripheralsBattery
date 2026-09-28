@@ -34,7 +34,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from . import logi_controls
 from .controls import Control, Unavailable
 from .hidio import HidApi, hexdump
-from .model import DEVICE, KEYBOARD, MOUSE, Reading
+from .model import DEVICE, HEADSET, KEYBOARD, MOUSE, Reading
 
 log = logging.getLogger("peribatt")
 
@@ -64,12 +64,26 @@ F_NAME = 0x0005
 F_UNIFIED = 0x1004
 F_STATUS = 0x1000
 F_VOLTAGE = 0x1001
-BATTERY_FEATURES = (F_UNIFIED, F_STATUS, F_VOLTAGE)
+F_ADC = 0x1F20              # headsets: battery voltage, bit 0 connected, bit 1 charging
+BATTERY_FEATURES = (F_UNIFIED, F_STATUS, F_VOLTAGE, F_ADC)
+
+# Logitech headsets that speak HID++ on their own dongle (HeadsetControl's list); the
+# battery comes from feature 0x1F20. The value is the name when the headset has none.
+HEADSETS = {
+    0x0A66: "Logitech G533", 0x0AC4: "Logitech G535", 0x0A5C: "Logitech G633",
+    0x0A89: "Logitech G635", 0x0A5B: "Logitech G933", 0x0A87: "Logitech G935",
+    0x0AB5: "Logitech G733", 0x0AFE: "Logitech G733", 0x0B1F: "Logitech G733",
+    0x0AA7: "Logitech G PRO", 0x0AAA: "Logitech G PRO X", 0x0ABA: "Logitech G PRO X",
+    0x0AFB: "Logitech G PRO X 2", 0x0AFC: "Logitech G PRO X 2",
+}
+HEADSET_COLLECTION = {0x0AC4: (0x000C, 0x0001)}      # others: (0xFF43, 0x0202)
 
 # Unifying / Bolt / LIGHTSPEED receivers. Anything else with a HID++ collection
 # is treated as a device on its own cable.
 RECEIVERS = {0xC52B, 0xC52F, 0xC531, 0xC532, 0xC534, 0xC539, 0xC53A, 0xC53D,
              0xC53F, 0xC541, 0xC545, 0xC547, 0xC548, 0xC54D}
+
+RECEIVER_WORD = "receiver"   # a receiver not in the list above still names itself one
 
 # 0x0005 function 2 device type
 _TYPES = {0: KEYBOARD, 2: KEYBOARD, 3: MOUSE, 4: MOUSE, 5: MOUSE}
@@ -138,6 +152,11 @@ def decode_battery(feature: int, p: Sequence[int]) -> Tuple[Optional[int], bool]
         if mv < 2500:            # nonsense / not measured yet
             return None, bool(p[2] & 0x80)
         return voltage_to_percent(mv), bool(p[2] & 0x80)
+    if feature == F_ADC:
+        mv = (p[0] << 8) | p[1]
+        if not p[2] & 0x01 or mv < 2500:    # the headset is not connected to its dongle
+            return None, False
+        return voltage_to_percent(mv), bool(p[2] & 0x02)
     return None, False
 
 
@@ -281,6 +300,7 @@ class LogitechSource:
         self.where: Dict[str, Tuple[int, str, int]] = {}   # key -> (pid, instance, slot), seen online
         self.caps: Dict[str, Dict[str, Optional[int]]] = {}  # key -> settings feature indexes
         self._io = threading.RLock()             # polling and device settings share the receiver
+        self.receivers = set(RECEIVERS)
 
     @staticmethod
     def slot_id(pid: int, index: int, instance: str = "") -> str:
@@ -292,9 +312,17 @@ class LogitechSource:
         from the path keeps them apart; it is left empty when a product id appears
         only once, which keeps the keys of the usual single receiver short."""
         groups: Dict[Tuple[int, str], Dict[int, bytes]] = {}
+        headsets: Dict[Tuple[int, str], bytes] = {}
         for d in self.api.enumerate(LOGITECH_VID):
-            if d.get("usage_page") == VENDOR_PAGE and d.get("usage") in (USAGE_SHORT, USAGE_LONG):
-                groups.setdefault((d["product_id"], instance(d.get("path"))), {})[d["usage"]] = d["path"]
+            pid, page, usage = d["product_id"], d.get("usage_page"), d.get("usage")
+            if RECEIVER_WORD in str(d.get("product_string") or "").lower():
+                self.receivers.add(pid)
+            if page == VENDOR_PAGE and usage in (USAGE_SHORT, USAGE_LONG):
+                groups.setdefault((pid, instance(d.get("path"))), {})[usage] = d["path"]
+            elif pid in HEADSETS and (page, usage) == HEADSET_COLLECTION.get(pid, (0xFF43, 0x0202)):
+                headsets[(pid, instance(d.get("path")))] = d["path"]
+        for k, path in headsets.items():              # only a long channel on these
+            groups.setdefault(k, {}).setdefault(USAGE_LONG, path)
         groups = {k: g for k, g in groups.items() if USAGE_LONG in g}
         pids = [pid for pid, _ in groups]
         return {(pid, inst if pids.count(pid) > 1 else ""): g for (pid, inst), g in groups.items()}
@@ -319,6 +347,9 @@ class LogitechSource:
                 if prof is None:
                     self.log.append(f"{sid}: no battery feature")
                     return None
+                if pid in HEADSETS:
+                    name = prof.name if prof.name != "Logitech device" else HEADSETS[pid]
+                    prof = Profile(prof.key, name, HEADSET, prof.feature, prof.feature_index)
                 self.profiles[sid] = prof
                 self.known[sid] = {"key": prof.key, "name": prof.name, "kind": prof.kind}
             p = ch.call(index, prof.feature_index, battery_function(prof.feature))
@@ -339,6 +370,9 @@ class LogitechSource:
                 self.silent[sid] = self.clock() + SILENT_BACKOFF
             return None
         level, charging = decode_battery(prof.feature, p)
+        if prof.feature == F_ADC and level is None:
+            self.log.append(f"{sid} {prof.name}: headset not connected")
+            return None                          # shown greyed as "switched off"
         self.where[prof.key] = (pid, inst, index)
         self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
         return Reading(prof.key, prof.name, prof.kind, level, charging, online=True)
@@ -362,7 +396,7 @@ class LogitechSource:
                 self.log.append(f"{where}: open failed: {e}")
                 continue
             try:
-                for index in (RECEIVER_SLOTS if pid in RECEIVERS else (WIRED,)):
+                for index in (RECEIVER_SLOTS if pid in self.receivers else (WIRED,)):
                     if self.silent.get(self.slot_id(pid, index, inst), 0) > self.clock():
                         continue
                     r = self._read(ch, pid, index, inst)
