@@ -182,7 +182,10 @@ class PystrayBackend:
                 out.append(Item("Hide this device", lambda: app.hide(key)))
             if app.open_diagnostics:
                 out.append(Item("Diagnostics…", lambda: app.open_diagnostics()))
-            out += [Menu.SEPARATOR, Item(f"Exit (v{__version__})", lambda: app.stop())]
+            out.append(Menu.SEPARATOR)
+            if app.open_settings:
+                out.append(Item("More Settings...", lambda: app.open_settings()))
+            out.append(Item(f"Exit (v{__version__})", lambda: app.stop()))
             return out
 
         return Menu(items)

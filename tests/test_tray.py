@@ -97,11 +97,14 @@ def test_menu_contents_and_actions(fake_pystray, tmp_path):
     assert icon.visible and icon.title == "PRO Wireless: 76%"
     # a short menu: the device lines, then only these
     assert labels(icon.menu) == ["PRO Wireless: 76%", "Rename…", "Refresh now", "Display",
-                                 "Hide this device", "Diagnostics…", f"Exit (v{__version__})"]
+                                 "Hide this device", "Diagnostics…", "More Settings...",
+                                 f"Exit (v{__version__})"]
+    find(icon.menu, "More Settings...").action()
+    assert settings == [1]
     left_click = next(i for i in icon.menu.items if isinstance(i, FakeItem) and i.default)
     assert not left_click.visible                     # left-click opens settings, out of sight
     left_click.action()
-    assert settings == [1]
+    assert settings == [1, 1]
     find(icon.menu, "Rename…").action()
     assert renamed == ["logi-1"]
     find(icon.menu, "Refresh now").action()
