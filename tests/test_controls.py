@@ -169,7 +169,7 @@ def hyperx(answers=True):
         auto_off, sidetone = 20, False
 
         def on_write(self, data):
-            cmd, payload = data[15], data[16]
+            cmd, payload = data[15], (data[16] if len(data) > 16 else 0)
             if not answers:
                 return
             if cmd == 0x02:

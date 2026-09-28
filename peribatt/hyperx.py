@@ -3,7 +3,8 @@
 
 Protocol (as documented by the HyperHeadset project, MIT):
 
-* request - 62-byte output report on the dongle's control collection::
+* request - output report on the dongle's control collection (sent as 16 bytes;
+  hidapi pads it to the collection's report length)::
 
       06 00 02 00 9a 00 00 68 4a 8e 0a 00 00 00 bb <cmd> 00 ... 00
 
@@ -48,7 +49,6 @@ PRODUCTS = {
     0x0B92: "HyperX Cloud II Wireless",
 }
 VENDOR_PAGE = 0xFF13
-PACKET_LEN = 62
 
 CMD_STATUS, CMD_BATTERY, CMD_CHARGE, CMD_MUTE = 0x01, 0x02, 0x03, 0x08
 CMD_SET_AUTO_OFF, CMD_SIDETONE, CMD_GET_AUTO_OFF = 0x18, 0x19, 0x1A
@@ -71,9 +71,14 @@ def _close_all(handles) -> None:
             pass
 
 
-def packet(cmd: int, payload: int = 0) -> bytes:
-    body = _BASE + bytes([cmd, payload])
-    return body + bytes(PACKET_LEN - len(body))
+def packet(cmd: int, payload: Optional[int] = None) -> bytes:
+    """The request, only as long as it needs to be: hidapi pads a short write to
+    the collection's output report length, but refuses one that is *longer*.
+    The Cloud II's report is 62 bytes, and a 62-byte packet was refused on a
+    Cloud Flight S dongle, whose report is shorter - so it never got a request.
+    (CubE135's Cloud Flight S monitor sends these same 16 bytes.)"""
+    body = _BASE + bytes([cmd])
+    return body if payload is None else body + bytes([payload])
 
 
 def decode(report: Sequence[int]) -> Dict[str, object]:
@@ -226,6 +231,7 @@ class HyperXSource:
     # -- state -----------------------------------------------------------
     def feed(self, report: Sequence[int], handle=None) -> None:
         changes = decode(report)
+        self.log.append(f"rx {hexdump(report, 12)}" + (f" -> {changes}" if changes else ""))
         if not changes:
             return
         log.debug("hyperx %s -> %s", hexdump(report, 10), changes)

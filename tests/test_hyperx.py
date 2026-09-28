@@ -19,10 +19,11 @@ def reply(cmd, b4=0, b7=0):
 
 
 def test_packet_layout():
+    # 16 bytes, as CubE135's Cloud Flight S monitor sends: hidapi pads a short write to
+    # the report length, but a longer one (the Cloud II's 62) is refused by the Flight S
     p = packet(CMD_BATTERY)
-    assert len(p) == 62
-    assert p[:16] == bytes.fromhex("06 00 02 00 9a 00 00 68 4a 8e 0a 00 00 00 bb 02")
-    assert p[14:16] == b"\xbb\x02" and not any(p[17:])
+    assert p == bytes.fromhex("06 00 02 00 9a 00 00 68 4a 8e 0a 00 00 00 bb 02")
+    assert packet(0x18, 30)[16] == 30 and len(packet(0x18, 30)) == 17
 
 
 def test_decode_known_replies():

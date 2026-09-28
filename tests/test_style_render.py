@@ -83,13 +83,30 @@ def test_border_off_frame_has_no_frame_pixels():
     assert off.getpixel((1, 16))[3] == 0
 
 
-def test_pictogram_fills_with_level():
-    empty = render(32, MOUSE, 0, style.RED)
-    half = render(32, MOUSE, 50, style.YELLOW)
-    full = render(32, MOUSE, 100, style.WHITE)
-    solid = [sum(1 for px in pixels(i) if px[:3] == (250, 250, 250) and px[3] > 200)
-             for i in (empty, half, full)]
-    assert solid[0] < solid[1] < solid[2]
+def test_the_frame_is_the_gauge():
+    """The frame fills clockwise from the top centre with the level; the rest is a
+    faint track. The right side is the 25% mark, the bottom 50%, the left 75%."""
+    def opaque_frame(img):
+        return sum(1 for px in pixels(img) if near(px[:3], style.GREEN) and px[3] > 200)
+    counts = [opaque_frame(render(32, MOUSE, lvl, style.GREEN)) for lvl in (0, 30, 60, 90, 100)]
+    assert counts == sorted(counts) and counts[0] < counts[2] < counts[4]
+    at30 = render(32, MOUSE, 30, style.GREEN)
+    assert at30.getpixel((31, 16))[3] > 200                  # past the right side: filled
+    assert at30.getpixel((0, 16))[3] < 120                   # the left side: track only
+    assert render(32, MOUSE, None, style.GREEN).getpixel((0, 16))[3] > 200   # unknown: full frame
+
+
+def test_the_gauge_is_measured_along_the_frame():
+    from peribatt.render import frame_path, head
+    path = frame_path(100, 5, 20)
+    half = head(path, 0.5)[-1]
+    assert abs(half[0] - 50) < 1 and half[1] > 90            # 50% is the bottom centre
+
+
+def test_pictogram_is_solid_whatever_the_level():
+    low = render(32, MOUSE, 5, style.RED, border_on=False)
+    high = render(32, MOUSE, 95, style.RED, border_on=False)
+    assert low.tobytes() == high.tobytes()
 
 
 def test_every_kind_has_a_distinct_pictogram():
