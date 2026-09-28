@@ -11,7 +11,7 @@ def test_setupapi_bluetooth_enumeration_runs():
     from peribatt.bluetooth import BluetoothSource, _SetupApi
     records = _SetupApi().records()
     assert isinstance(records, list)
-    for _cid, name, level, started in records:
+    for _cid, name, level, started, _mac in records:
         assert isinstance(name, str) and isinstance(level, int) and isinstance(started, bool)
     assert isinstance(BluetoothSource().poll(), list)
 
@@ -129,3 +129,9 @@ def test_device_notifications_register_and_unregister():
     assert hidio._watching
     w.stop()
     assert not hidio._watching
+
+
+def test_classic_bluetooth_devices_runs():
+    from peribatt.bluetooth import classic_devices
+    for mac, info in classic_devices().items():
+        assert len(mac) == 12 and isinstance(info.connected, bool)

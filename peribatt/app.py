@@ -25,6 +25,9 @@ RESUME_SETTLE = 3.0          # after waking: give USB and the radios a moment...
 RESUME_RECHECK = 15.0        # ...and look again once wireless devices have reconnected
 SLEEP_GAP = 30.0             # a wait that overran by this much means the PC was asleep
 SLOW_SOURCE = 5.0            # log a warning when one provider takes longer than this
+# After a device is plugged in or connects, Windows reports some batteries (Bluetooth
+# ones especially) a few seconds late: look again this long after the event.
+RECHECKS = (3.0, 8.0, 15.0)
 SEARCHING = "Peripherals Battery: looking for devices…"
 NOTHING_FOUND = "Peripherals Battery: no devices found yet - right-click for Diagnostics"
 ALL_HIDDEN = "Peripherals Battery: all devices are hidden - right-click to show them"
@@ -103,6 +106,7 @@ class App:
         self.offline_since: Dict[str, float] = {}      # key -> when it was first seen off
         self.update_available: Optional[tuple] = None  # (version, url) of a newer release
         self.update_checker = None
+        self._rechecks: List[float] = []               # extra polls after a device event
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -145,7 +149,13 @@ class App:
 
     def apply(self, readings: Sequence[Reading]) -> None:
         """Results of a full poll. Devices that went missing turn grey."""
+        from .bluetooth import drop_twins
+        kept = drop_twins(list(readings))
+        twins = {r.key for r in readings} - {r.key for r in kept}
+        readings = kept
         with self.lock:
+            for key in twins & set(self.readings):
+                self._drop(key)                        # read over USB now: one icon, not two
             fresh = {}
             for r in merge(readings):
                 if r.online:
@@ -168,6 +178,15 @@ class App:
                     self._draw(key)                    # off for too long: leaves the tray
             self._sync_placeholder()
         self._flush_menus()
+
+    def _drop(self, key: str) -> None:
+        self.readings.pop(key, None)
+        self.offline_since.pop(key, None)
+        self.titles.pop(key, None)
+        self.store.devices.pop(key, None)
+        if self.shown.pop(key, None) is not None:
+            self.backend.remove(key)
+        self._menus_dirty = True
 
     def _flush_menus(self) -> None:
         if self._menus_dirty:
@@ -345,10 +364,7 @@ class App:
             self.store[key] = value
             self.store.save()
         self.redraw_all()
-        for s in self.sources:                   # e.g. Bluetooth switched back on: look now
-            invalidate = getattr(s, "invalidate", None)
-            if invalidate:
-                invalidate()
+        self._invalidate_sources()               # e.g. Bluetooth switched back on: look now
         self.refresh_event.set()
 
     def set_kind(self, key: str, kind: str) -> None:
@@ -478,9 +494,19 @@ class App:
         self.refresh_event.set()
 
     def devices_changed(self) -> None:
-        """A HID device was plugged in or removed: look now, not at the next poll."""
+        """A device was plugged in, removed or connected: look now, not at the next
+        poll - and a few more times shortly after, for batteries reported late."""
         log.info("device plugged in or removed: re-checking")
+        now = time.monotonic()
+        self._rechecks = [now + d for d in RECHECKS]
+        self._invalidate_sources()
         self.refresh_event.set()
+
+    def _invalidate_sources(self) -> None:
+        for s in self.sources:                          # cached (throttled) sources look again
+            invalidate = getattr(s, "invalidate", None)
+            if invalidate:
+                invalidate()
 
     def _after_resume(self) -> Optional[float]:
         """On the poll thread: let devices settle, drop handles that may have gone
@@ -528,9 +554,14 @@ class App:
         if self.stop_event.is_set():
             return
         self.poll_once()
-        deadline = time.monotonic() + max(10, int(self.store["poll_seconds"]))
+        now = time.monotonic()
+        deadline = now + max(10, int(self.store["poll_seconds"]))
         if recheck is not None:
             deadline = min(deadline, recheck)
+        self._rechecks = [t for t in self._rechecks if t > now]
+        if self._rechecks:
+            deadline = min(deadline, self._rechecks[0])
+            self._invalidate_sources()
         while not self.stop_event.is_set():
             left = deadline - time.monotonic()
             if left <= 0:

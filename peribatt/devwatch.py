@@ -28,6 +28,9 @@ from .winapi import GUID, IS_WINDOWS
 log = logging.getLogger("peribatt")
 
 GUID_DEVINTERFACE_HID = "4D1E55B2-F16F-11CF-88CB-001111000030"
+# Bluetooth headphones bring no HID interface when they connect, but an audio one.
+KSCATEGORY_AUDIO = "6994AD04-93EF-11D0-A3CC-00A0C9223196"
+WATCHED = (GUID_DEVINTERFACE_HID, KSCATEGORY_AUDIO)
 CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE = 0
 ACTION_ARRIVAL, ACTION_REMOVAL = 0, 1
 MAX_DEVICE_ID_LEN = 200
@@ -62,7 +65,7 @@ class DeviceWatcher:
         self.events = 0
         self._timer: Optional[threading.Timer] = None
         self._lock = threading.Lock()
-        self._handle = ctypes.c_void_p()
+        self._handles: list = []
         self._callback = CALLBACK(self._event)      # must outlive the registration
         self.registered = False
 
@@ -103,12 +106,17 @@ class DeviceWatcher:
         except (OSError, AttributeError) as e:      # Windows 7
             log.info("device notifications unavailable: %s", e)
             return False
-        flt = CM_NOTIFY_FILTER(cbSize=ctypes.sizeof(CM_NOTIFY_FILTER),
-                               FilterType=CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE)
-        flt.u.ClassGuid = GUID.of(GUID_DEVINTERFACE_HID)
-        err = register(ctypes.byref(flt), None, self._callback, ctypes.byref(self._handle))
-        if err:
-            log.info("CM_Register_Notification failed: %s", err)
+        for guid in WATCHED:
+            flt = CM_NOTIFY_FILTER(cbSize=ctypes.sizeof(CM_NOTIFY_FILTER),
+                                   FilterType=CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE)
+            flt.u.ClassGuid = GUID.of(guid)
+            handle = ctypes.c_void_p()
+            err = register(ctypes.byref(flt), None, self._callback, ctypes.byref(handle))
+            if err:
+                log.info("CM_Register_Notification(%s) failed: %s", guid, err)
+            else:
+                self._handles.append(handle)
+        if not self._handles:
             return False
         self.registered = True
         hidio.set_watching(True)                    # the cache can trust the events now
@@ -125,7 +133,9 @@ class DeviceWatcher:
             unregister = ctypes.WinDLL("cfgmgr32").CM_Unregister_Notification
             unregister.argtypes = [ctypes.c_void_p]
             unregister.restype = ctypes.c_ulong
-            unregister(self._handle)
+            for handle in self._handles:
+                unregister(handle)
         except (OSError, AttributeError):
             pass
+        self._handles = []
         self.registered = False

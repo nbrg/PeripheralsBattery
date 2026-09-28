@@ -145,3 +145,85 @@ def test_supported_check_and_reload(tmp_path, monkeypatch):
         ' "listen": [{"expect": "01", "level": {"byte": 1}}]}]')
     sources.reload_recipes([rs])
     assert (0x1234, 0x0001) in rs.claimed
+
+
+# --- Bluetooth: connection state, device class, twins ---------------------------------
+
+def test_mac_addresses_from_instance_ids():
+    root = r"BTHENUM\DEV_A0B1C2D3E4F5\7&1b2a&0&BLUETOOTHDEVICE_A0B1C2D3E4F5"
+    assert bluetooth.mac_of(root) == "A0B1C2D3E4F5"
+    assert bluetooth.mac_of(r"BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&1b&0&"
+                            r"A0B1C2D3E4F5_C00000000") == "A0B1C2D3E4F5"
+    assert bluetooth.mac_of(r"BTHLEDEVICE\{00001812-0000-1000-8000-00805f9b34fb}_Dev_VID&02046d_PID&b023"
+                            r"_REV&0003_d1e2f3a4b5c6\8&2a&0&0019") == "D1E2F3A4B5C6"
+    assert bluetooth.mac_of(r"HID\{00001124-0000-1000-8000-00805f9b34fb}_VID&0002046D\9&1&0&0000") == ""
+
+
+def test_device_class_gives_the_picture():
+    from peribatt.model import HEADSET, KEYBOARD, MOUSE
+    assert bluetooth.kind_from_class(0x240404) == HEADSET          # audio/video, wearable headset
+    assert bluetooth.kind_from_class(0x002540) == KEYBOARD         # peripheral, keyboard
+    assert bluetooth.kind_from_class(0x002580) == MOUSE            # peripheral, pointing device
+    assert bluetooth.kind_from_class(0x002508) == "gamepad"        # peripheral, gamepad
+    assert bluetooth.kind_from_class(0x5A020C) == "device"         # a phone
+
+
+def test_classic_connection_state_beats_the_node_state():
+    records = [("{H}", "WH-1000XM4 Hands-Free AG", 70, True, "A0B1C2D3E4F5"),
+               ("{P}", "Mystery Pad", 50, False, "112233445566")]
+    classic = {"A0B1C2D3E4F5": bluetooth.Classic(False, 0x240404),
+               "112233445566": bluetooth.Classic(True, 0x002508)}
+    out = {r.name: r for r in bluetooth.to_readings(records, classic)}
+    assert not out["WH-1000XM4"].online and out["WH-1000XM4"].kind == "headset"
+    assert out["Mystery Pad"].online and out["Mystery Pad"].kind == "gamepad"
+
+
+def test_a_device_read_over_usb_hides_its_bluetooth_twin():
+    from peribatt.model import MOUSE, Reading
+    readings = [Reading("razer-00b7", "Razer DeathAdder V3 Pro", MOUSE, 60),
+                Reading("bt-1", "DeathAdder V3 Pro", MOUSE, 60),
+                Reading("bt-2", "Keychron K8 Pro", "keyboard", 80),
+                Reading("logi-1", "G Pro", MOUSE, 50),
+                Reading("bt-3", "Logitech G Pro X Wireless", "headset", 70)]
+    keys = [r.key for r in bluetooth.drop_twins(readings)]
+    assert keys == ["razer-00b7", "bt-2", "logi-1", "bt-3"]     # a short name does not swallow others
+
+
+def test_the_bluetooth_twin_leaves_the_tray(tmp_path):
+    from peribatt.app import App
+    from peribatt.config import Store
+    from peribatt.model import MOUSE, Reading
+
+    from .test_app import FakeBackend
+    app = App(Store(tmp_path / "settings.json"), FakeBackend())
+    app.apply([Reading("bt-1", "DeathAdder V3 Pro", MOUSE, 60)])
+    assert "bt-1" in app.backend.icons
+    app.apply([Reading("razer-00b7", "Razer DeathAdder V3 Pro", MOUSE, 60),
+               Reading("bt-1", "DeathAdder V3 Pro", MOUSE, 60)])
+    assert "bt-1" not in app.backend.icons and "bt-1" not in app.readings
+
+
+def test_struct_sizes_match_windows():
+    import ctypes
+    assert ctypes.sizeof(bluetooth.BLUETOOTH_DEVICE_INFO) == 560
+    assert ctypes.sizeof(bluetooth.BLUETOOTH_DEVICE_SEARCH_PARAMS) == 40
+
+
+def test_a_plug_event_schedules_quick_rechecks(tmp_path):
+    from peribatt.app import RECHECKS, App
+    from peribatt.config import Store
+
+    from .test_app import FakeBackend
+    calls = []
+
+    class Cached:
+        name = "bluetooth"
+
+        def poll(self):
+            return []
+
+        def invalidate(self):
+            calls.append(1)
+    app = App(Store(tmp_path / "settings.json"), FakeBackend(), sources=[Cached()])
+    app.devices_changed()
+    assert len(app._rechecks) == len(RECHECKS) and calls == [1]
