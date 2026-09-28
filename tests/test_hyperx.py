@@ -56,7 +56,7 @@ def test_poll_opens_vendor_collection_and_asks_for_everything():
     api, h = dongle()
     src = HyperXSource(api=api, threaded=False)
     [r] = src.poll()
-    assert api.opened == [b"vendor"]
+    assert api.opened == [b"vendor", b"consumer"]          # the vendor page first
     assert [w[15] for w in h.written] == [CMD_STATUS, CMD_BATTERY, CMD_CHARGE]
     assert r.name == "HyperX Cloud Flight S" and r.kind == HEADSET and not r.online
 
@@ -138,3 +138,58 @@ def test_reader_thread_feeds_reports():
     assert got.wait(2)
     src.close()
     assert hyperx.VENDOR_PAGE == 0xFF13
+
+
+def test_windows_dongle_answering_on_another_collection():
+    """On Windows the Cloud Flight S may take requests on a collection that is
+    not the 0xFF13 page: every collection is tried, then only the one that answers."""
+    api = FakeApi()
+    other = QueueHandle()
+    api.add(0x0951, 0x16EA, b"kbd", OSError("access denied"), usage_page=0x01, usage=6)
+    api.add(0x0951, 0x16EA, b"ff00", other, usage_page=0xFF00, usage=1)
+    api.add(0x0951, 0x16EA, b"cons", QueueHandle(), usage_page=0x0C, usage=1)
+    src = HyperXSource(api=api, threaded=False)
+    [r] = src.poll()
+    assert other.written and r.note == "switched off"      # found, not yet answered
+    src.feed(reply(CMD_BATTERY, b7=77), other)
+    assert src.readings()[0].level == 77
+    assert src._writers == [other]
+    other.written.clear()
+    src.poll()
+    assert [w[15] for w in other.written] == [CMD_STATUS, CMD_BATTERY, CMD_CHARGE]
+
+
+def test_feature_report_fallback():
+    class FeatureOnly(QueueHandle):
+        def __init__(self):
+            super().__init__()
+            self.features = []
+
+        def write(self, data):
+            raise OSError("WriteFile: (0x00000001) Incorrect function.")
+
+        def send_feature_report(self, data):
+            self.features.append(bytes(data))
+            return len(data)
+
+    api = FakeApi()
+    h = FeatureOnly()
+    api.add(0x0951, 0x16EA, b"v", h, usage_page=0xFF13, usage=1)
+    src = HyperXSource(api=api, threaded=False)
+    [r] = src.poll()
+    assert [f[15] for f in h.features] == [CMD_STATUS, CMD_BATTERY, CMD_CHARGE]
+    assert r.note == "switched off"                        # still there, not "unplugged"
+
+
+def test_collections_that_reject_requests_are_dropped():
+    class Deaf(QueueHandle):
+        def write(self, data):
+            raise OSError("wrong report id")
+
+    api = FakeApi()
+    good, deaf = QueueHandle(), Deaf()
+    api.add(0x0951, 0x16EA, b"v", good, usage_page=0xFF13, usage=1)
+    api.add(0x0951, 0x16EA, b"c", deaf, usage_page=0x0C, usage=1)
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    assert src._writers == [good] and src.state.present

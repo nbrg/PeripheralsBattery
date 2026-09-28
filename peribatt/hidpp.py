@@ -301,7 +301,10 @@ class LogitechSource:
         self.log = []
         out: List[Reading] = []
         groups = self._collections()
+        if not groups:
+            self.log.append("no Logitech HID++ collection (FF00:0002) found")
         for pid, paths in groups.items():
+            self.log.append(f"{pid:04x}: collections {sorted(paths)}")
             try:
                 ch = self._open(paths)
             except OSError as e:

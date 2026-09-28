@@ -3,7 +3,7 @@
 
 Protocol (as documented by the HyperHeadset project, MIT):
 
-* request - 62-byte output report on the vendor collection (usage page 0xFF13)::
+* request - 62-byte output report on the dongle's control collection::
 
       06 00 02 00 9a 00 00 68 4a 8e 0a 00 00 00 bb <cmd> 00 ... 00
 
@@ -14,6 +14,12 @@ Protocol (as documented by the HyperHeadset project, MIT):
       cmd 0x02  battery      byte 7: percent
       cmd 0x03  charging     byte 4: 0 no, 1 charging, 2 full, other = error
       cmd 0x08  mic mute     byte 4: 1 = muted
+
+Which collection takes the requests differs between dongles and operating
+systems - usually the vendor page 0xFF13, but on Windows some dongles only take
+them on another collection, and some only as *feature* reports ("Incorrect
+function" for a plain write). So every collection that opens is tried, the
+vendor page first, and once one of them answers only that one is written to.
 
 The dongle also pushes these reports by itself (mute button, power switch), so
 one reader thread per open collection listens all the time; the app sees a
@@ -137,7 +143,7 @@ class HyperXSource:
         self.seen = False               # the dongle has been found at least once
         self._lock = threading.RLock()
         self._handles: List[object] = []
-        self._writer = None
+        self._writers: List[object] = []   # collections requests go to (narrowed on a reply)
         self._stop = threading.Event()
         self.log: deque = deque(maxlen=50)      # diagnostics; bounded, it is never cleared
 
@@ -147,28 +153,30 @@ class HyperXSource:
         if not infos:
             return False
         self._stop = threading.Event()
+        infos.sort(key=lambda d: (d.get("usage_page", 0) != VENDOR_PAGE,
+                                  d.get("usage_page", 0) < 0xFF00))
         for d in infos:
-            page = d.get("usage_page", 0)
-            if page != VENDOR_PAGE:
-                continue
+            page, usage = d.get("usage_page", 0), d.get("usage", 0)
             try:
                 h = self.api.open(d["path"])
             except OSError as e:
-                self.log.append(f"open {page:04x}: {e}")
+                # Keyboard/mouse-like collections belong to Windows: expected.
+                self.log.append(f"open {page:04x}:{usage:04x}: {e}")
                 continue
+            self.log.append(f"opened {page:04x}:{usage:04x}")
             self._handles.append(h)
-            self._writer = self._writer or h
+            self._writers.append(h)
             if self.threaded:
                 threading.Thread(target=self._reader, args=(h, self._stop), daemon=True,
                                  name="hyperx-reader").start()
-        if self._writer is None:
+        if not self._handles:
             return False
         self.state.pid = infos[0]["product_id"]
         return True
 
     def close(self):
         self._stop.set()
-        handles, self._handles, self._writer = self._handles, [], None
+        handles, self._handles, self._writers = self._handles, [], []
         if not self.threaded:
             _close_all(handles)
         # Threaded: each reader closes its own handle once its read returns. Closing a
@@ -185,7 +193,7 @@ class HyperXSource:
                         self._lost()
                     return
                 if report and not stop.is_set():
-                    self.feed(report)
+                    self.feed(report, handle)
         finally:
             _close_all([handle])
 
@@ -199,12 +207,15 @@ class HyperXSource:
             self.on_change(snap)
 
     # -- state -----------------------------------------------------------
-    def feed(self, report: Sequence[int]) -> None:
+    def feed(self, report: Sequence[int], handle=None) -> None:
         changes = decode(report)
         if not changes:
             return
         log.debug("hyperx %s -> %s", hexdump(report, 10), changes)
         with self._lock:
+            if handle is not None and handle in self._writers and len(self._writers) > 1:
+                self._writers = [handle]             # this collection answers: use only it
+                self.log.append("found the collection that answers")
             was_online = self.state.online
             changed = self.state.apply(changes)
             snap = self.state.reading()
@@ -213,16 +224,34 @@ class HyperXSource:
         if changed and self.on_change:
             self.on_change(snap)
 
-    def _send(self, *cmds: int) -> None:
-        writer = self._writer
-        if writer is None:
-            return
+    @staticmethod
+    def _write(handle, data: bytes) -> None:
         try:
-            for cmd in cmds:
-                writer.write(packet(cmd))
+            handle.write(data)
+            return
         except (OSError, ValueError) as e:
-            self.log.append(f"write: {e}")
-            self._lost()
+            send_feature = getattr(handle, "send_feature_report", None)
+            if send_feature is None:
+                raise
+            try:
+                send_feature(data)                   # dongles that only take feature reports
+            except (OSError, ValueError):
+                raise e from None
+
+    def _send(self, *cmds: int) -> None:
+        for writer in list(self._writers):
+            try:
+                for cmd in cmds:
+                    self._write(writer, packet(cmd))
+            except (OSError, ValueError) as e:
+                self.log.append(f"write: {e}")
+                with self._lock:
+                    if writer in self._writers:
+                        self._writers.remove(writer)
+                    gone = not self._writers
+                if gone:
+                    self._lost()                     # nothing takes requests: unplugged
+                    return
 
     def poll(self) -> List[Reading]:
         with self._lock:
@@ -245,7 +274,7 @@ class HyperXSource:
 
     def poll_fast(self) -> None:
         # Only while the headset is on: a switched-off headset has no mute state.
-        if self._writer is not None and self.state.online:
+        if self._writers and self.state.online:
             self._send(CMD_STATUS)
 
     def readings(self) -> List[Reading]:

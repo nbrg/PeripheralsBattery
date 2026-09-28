@@ -148,7 +148,7 @@ def test_open_failure_is_contained():
     api.add(0x046D, RECEIVER_PID, b"long", OSError("access denied"), 0xFF00, 0x0002)
     src = LogitechSource(api=api)
     assert src.poll() == []
-    assert "open failed" in src.log[0]
+    assert any("open failed" in line for line in src.log)
 
 
 def test_slug():
