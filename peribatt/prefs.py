@@ -45,6 +45,7 @@ SECTIONS: Tuple[Tuple[str, Sequence[object]], ...] = (
                ((0, "Off"), (10, "10%"), (15, "15%"), (20, "20%"), (25, "25%"))),
         Toggle("notify_full", "Notify when a device is fully charged"),
         Toggle("autostart", "Start with Windows"),
+        Toggle("update_check", "Check for updates once a day"),
     )),
     ("Icons", (
         Number("low", "Red frame below (%)", 1, 50),
@@ -52,6 +53,10 @@ SECTIONS: Tuple[Tuple[str, Sequence[object]], ...] = (
         Toggle("show_number", "Show the percentage instead of the device picture"),
         Toggle("flash_on_mute", "Blink the headset icon while its mic is muted"),
         Toggle("windows_mute", "Count a mic muted in Windows as muted"),
+        Choice("icon_colour", "Icon colour",
+               (("auto", "Follow the taskbar"), ("white", "White"), ("black", "Black"))),
+        Choice("hide_off_after", "Remove switched-off devices from the tray",
+               ((0, "Never"), (5, "After 5 minutes"), (30, "After 30 minutes"), (120, "After 2 hours"))),
     )),
     ("Sources", (
         Toggle("bluetooth", "Bluetooth devices Windows knows the battery of"),
@@ -120,6 +125,8 @@ def apply(app, clean: Dict[str, Any], set_autostart=winshell.set_autostart) -> N
                 app.store[key] = value
                 changed = True
         app.store.save()
+    if clean.get("update_check") and getattr(app, "update_checker", None) is not None:
+        app.update_checker.check_soon()
     if "autostart" in clean:
         set_autostart(bool(clean["autostart"]))
     if changed:

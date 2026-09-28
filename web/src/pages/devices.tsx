@@ -16,6 +16,7 @@ import {
   Menu,
   MenuDivider,
   MenuItem,
+  MenuItemRadio,
   MenuList,
   MenuPopover,
   MenuTrigger,
@@ -33,6 +34,7 @@ import {
   EditRegular,
   EyeOffRegular,
   EyeRegular,
+  ImageRegular,
   MicOffRegular,
   MoreHorizontalRegular,
   PlugDisconnectedRegular,
@@ -44,7 +46,13 @@ import {
 import { BatteryBar, PageHeader } from "@/components/common"
 import { DeviceSettingsDialog } from "@/components/device-settings"
 import { useNotify } from "@/components/notify"
-import { api, withToken, type Device, type State } from "@/lib/api"
+import { api, withToken, type Device, type Kind, type State } from "@/lib/api"
+import { UpdateBar } from "@/pages/settings"
+
+const PICTURES: ["" | Kind, string][] = [
+  ["", "Automatic"], ["mouse", "Mouse"], ["keyboard", "Keyboard"],
+  ["headset", "Headset"], ["gamepad", "Controller"], ["device", "Other"],
+]
 
 const KIND_LABEL: Record<string, string> = {
   mouse: "Mouse",
@@ -104,6 +112,17 @@ export function DevicesPage({ state, refresh, go }: {
   const [forgetting, setForgetting] = useState<Device | null>(null)
   const [configuring, setConfiguring] = useState<Device | null>(null)
 
+  async function picture(d: Device, kind: "" | Kind) {
+    try {
+      await api.picture(d.key, kind)
+      notify(kind ? `${d.name} now shows a ${PICTURES.find(([k]) => k === kind)?.[1].toLowerCase()}` :
+             `${d.name} is back to its own picture`)
+      refresh()
+    } catch (e) {
+      notify((e as Error).message, "error")
+    }
+  }
+
   async function act(d: Device, action: "hide" | "show" | "forget", done: string) {
     try {
       await api.device(d.key, action)
@@ -123,6 +142,7 @@ export function DevicesPage({ state, refresh, go }: {
         actions={<Button icon={<SparkleRegular />} onClick={() => go("learn")}>Learn a new device</Button>}
       />
 
+      {state?.update && <div style={{ marginBottom: 16 }}><UpdateBar update={state.update} /></div>}
       {state === null ? (
         <Skeleton className={s.grid} aria-label="Loading devices">
           <SkeletonItem style={{ height: 150, borderRadius: 12 }} />
@@ -144,6 +164,7 @@ export function DevicesPage({ state, refresh, go }: {
             <DeviceCard key={d.key} d={d} low={state.settings.low} warn={state.settings.warn}
                         onRename={() => setRenaming(d)}
                         onConfigure={() => setConfiguring(d)}
+                        onPicture={(kind) => picture(d, kind)}
                         onToggle={() => act(d, d.hidden ? "show" : "hide",
                                             d.hidden ? `${d.name} is back in the tray` : `${d.name} hidden from the tray`)}
                         onForget={() => setForgetting(d)} />
@@ -176,12 +197,13 @@ export function DevicesPage({ state, refresh, go }: {
   )
 }
 
-function DeviceCard({ d, low, warn, onRename, onConfigure, onToggle, onForget }: {
+function DeviceCard({ d, low, warn, onRename, onConfigure, onPicture, onToggle, onForget }: {
   d: Device
   low: number
   warn: number
   onRename: () => void
   onConfigure: () => void
+  onPicture: (kind: "" | Kind) => void
   onToggle: () => void
   onForget: () => void
 }) {
@@ -218,6 +240,19 @@ function DeviceCard({ d, low, warn, onRename, onConfigure, onToggle, onForget }:
                 <MenuItem icon={<SettingsRegular />} onClick={onConfigure}>Device settings</MenuItem>
               )}
               <MenuItem icon={<EditRegular />} onClick={onRename}>Rename</MenuItem>
+              <Menu checkedValues={{ picture: [d.picture] }}
+                    onCheckedValueChange={(_, data) => onPicture(data.checkedItems[0] as "" | Kind)}>
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuItem icon={<ImageRegular />}>Picture</MenuItem>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    {PICTURES.map(([kind, label]) => (
+                      <MenuItemRadio key={kind || "auto"} name="picture" value={kind}>{label}</MenuItemRadio>
+                    ))}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
               <MenuItem icon={d.hidden ? <EyeRegular /> : <EyeOffRegular />} onClick={onToggle}>
                 {d.hidden ? "Show in tray" : "Hide from tray"}
               </MenuItem>

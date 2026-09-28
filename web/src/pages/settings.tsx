@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import {
   Body1,
+  Button,
   Caption1,
   Card,
   Divider,
@@ -8,6 +9,7 @@ import {
   Field,
   Input,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Option,
@@ -87,17 +89,19 @@ function Toggle({ s, save, k, title, description }: {
 function Choice({ state, save, k, title, description }: {
   state: State
   save: Save
-  k: "poll_seconds" | "alert_at"
+  k: "poll_seconds" | "alert_at" | "icon_colour" | "hide_off_after"
   title: string
   description?: string
 }) {
-  const options = state.choices[k] ?? []
+  const options: [number | string, string][] = state.choices[k] ?? []
   const current = options.find(([v]) => v === state.settings[k])
+  // Choices are numbers (seconds, percent) or words (colours): send back the same type.
+  const parse = (v: string) => (typeof options[0]?.[0] === "number" ? Number(v) : v)
   return (
     <SettingRow id={k} title={title} description={description}>
-      <Dropdown id={k} aria-label={title} style={{ minWidth: 150 }}
+      <Dropdown id={k} aria-label={title} style={{ minWidth: 170 }}
                 value={current?.[1] ?? ""} selectedOptions={[String(state.settings[k])]}
-                onOptionSelect={(_, data) => data.optionValue && save(k, Number(data.optionValue))}>
+                onOptionSelect={(_, data) => data.optionValue && save(k, parse(data.optionValue) as never)}>
         {options.map(([value, label]) => <Option key={value} value={String(value)}>{label}</Option>)}
       </Dropdown>
     </SettingRow>
@@ -117,9 +121,11 @@ export function GeneralPage({ state, save }: { state: State; save: Save }) {
           <Choice state={state} save={save} k="poll_seconds" title="Check batteries every"
                   description="Mute and power changes still show up instantly." />
         </Section>
-        <Section title="Startup">
+        <Section title="Startup and updates">
           <Toggle s={s} save={save} k="autostart" title="Start with Windows"
                   description="Runs quietly in the tray when you sign in." />
+          <Toggle s={s} save={save} k="update_check" title="Check for updates"
+                  description="Once a day the app asks GitHub for the latest release. Nothing is downloaded by itself." />
         </Section>
       </div>
     </>
@@ -224,6 +230,10 @@ export function AppearancePage({ state, save }: { state: State; save: Save }) {
                       onChange={(_, d) => save("show_number", d.checked)} />
             </div>
           </SettingRow>
+          <Choice state={state} save={save} k="icon_colour" title="Icon colour"
+                  description="Follows the taskbar by default. Pick one for a see-through taskbar (TranslucentTB and the like)." />
+          <Choice state={state} save={save} k="hide_off_after" title="Remove switched-off devices"
+                  description="Their icons leave the tray after this long, and come back when the device is switched on." />
         </Section>
         <Section title="Microphone">
           <Toggle s={s} save={save} k="flash_on_mute" title="Blink the headset icon while its mic is muted" />
@@ -284,6 +294,7 @@ export function AboutPage({ state }: { state: State }) {
             <Caption1 className={st.sub}>Version {state.version}</Caption1>
           </div>
         </div>
+        {state.update && <UpdateBar update={state.update} />}
         <Divider />
         <Body1 className={st.sub}>
           Battery levels of your wireless mouse, headset, keyboard and controllers in the Windows tray - no vendor
@@ -295,5 +306,21 @@ export function AboutPage({ state }: { state: State }) {
         </Body1>
       </Card>
     </>
+  )
+}
+
+export function UpdateBar({ update }: { update: { version: string; url: string } }) {
+  return (
+    <MessageBar intent="success" data-testid="update-bar">
+      <MessageBarBody>
+        <MessageBarTitle>Version {update.version} is out</MessageBarTitle>
+        Download it from the release page and run it over this one; your settings are kept.
+      </MessageBarBody>
+      <MessageBarActions>
+        <Button size="small" appearance="primary" as="a" href={update.url} target="_blank" rel="noreferrer">
+          Get it
+        </Button>
+      </MessageBarActions>
+    </MessageBar>
   )
 }

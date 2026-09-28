@@ -102,6 +102,13 @@ def test_devices_page(browser, demo, scheme):
     page.get_by_role("button", name="Save").click()
     sync_api.expect(page.get_by_role("heading", name="Office keyboard")).to_be_visible()
     assert app.store["names"]["bt-k8"] == "Office keyboard"
+
+    # give a device another picture
+    page.get_by_role("button", name="Actions for PRO Wireless").click()
+    page.get_by_role("menuitem", name="Picture").click()
+    page.get_by_role("menuitemradio", name="Controller").click()
+    sync_api.expect(page.locator(".fui-ToastTitle", has_text="now shows a controller")).to_be_visible()
+    assert app.store["kinds"]["logi-1"] == "gamepad"
     page.close()
 
 

@@ -30,6 +30,12 @@ DEFAULTS: Dict[str, Any] = {
     "headsetcontrol": "",        # path to headsetcontrol.exe ("" = look on PATH)
     "hidden": [],                # device keys the user chose to hide
     "names": {},                 # device key -> name chosen by the user
+    "kinds": {},                 # device key -> picture chosen by the user (mouse, headset...)
+    "icon_colour": "auto",       # "auto" follows the taskbar; "white" / "black" for see-through taskbars
+    "hide_off_after": 0,         # minutes before a switched-off device leaves the tray (0 = never)
+    "update_check": True,        # once a day: is there a newer release on GitHub?
+    "update_last": 0.0,          # when that was last asked (Unix time)
+    "update_told": "",           # the newest version the user was already told about
     "first_run_done": False,     # autostart is switched on once, at the very first launch
     "welcomed": False,           # the first-launch hint about the ^ tray overflow was shown
 }
@@ -66,14 +72,18 @@ class Store:
             return store
         except (OSError, ValueError) as e:
             log.warning("settings unreadable, using defaults: %s", e)
+            store.keep_bad_copy()
             return store
         if not isinstance(raw, dict):
             log.warning("settings file has an unexpected shape, using defaults")
+            store.keep_bad_copy()
             return store
         settings = raw.get("settings")
         for k, v in (settings.items() if isinstance(settings, dict) else ()):
             default = DEFAULTS.get(k)
             # bool is an int in Python: don't let `true` become a poll interval
+            if isinstance(default, float) and isinstance(v, int) and not isinstance(v, bool):
+                v = float(v)                             # JSON writes 0.0 back as 0
             if k in DEFAULTS and isinstance(v, type(default)) and \
                     isinstance(v, bool) == isinstance(default, bool):
                 store.settings[k] = v
@@ -82,6 +92,16 @@ class Store:
             if isinstance(value, dict):
                 setattr(store, attr, {k: v for k, v in value.items() if isinstance(v, dict)})
         return store
+
+    def keep_bad_copy(self) -> None:
+        """A damaged settings file is kept as ``settings.json.bad`` (the next save
+        would overwrite it), so the user or a bug report can still see what was in it."""
+        bad = self.path.with_name(self.path.name + ".bad")
+        try:
+            os.replace(self.path, bad)
+            log.warning("kept the damaged settings file as %s", bad)
+        except OSError as e:
+            log.warning("could not keep the damaged settings file: %s", e)
 
     def _snapshot(self) -> str:
         """The file's text. Other threads may be updating the dicts while this

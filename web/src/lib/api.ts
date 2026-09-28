@@ -21,6 +21,8 @@ export interface Device {
   icon: string
   /** The app can change settings of this device (DPI, polling rate...). */
   configurable: boolean
+  /** The picture the user chose ("" = the one the app picked). */
+  picture: "" | Kind
 }
 
 /** One device setting, as the device reported it. */
@@ -51,6 +53,9 @@ export interface Settings {
   bluetooth: boolean
   xinput: boolean
   headsetcontrol: string
+  update_check: boolean
+  icon_colour: "auto" | "white" | "black"
+  hide_off_after: number
 }
 
 export interface State {
@@ -61,6 +66,8 @@ export interface State {
   limits: Record<string, [number, string]>
   devices: Device[]
   settings: Settings
+  /** Set when a newer release is out. */
+  update?: { version: string; url: string }
 }
 
 export class ApiError extends Error {}
@@ -85,6 +92,7 @@ export const api = {
     call<{ ok: boolean; settings: Settings }>("POST", "/api/settings", values),
   device: (key: string, action: "rename" | "hide" | "show" | "forget", name?: string) =>
     call<{ ok: boolean }>("POST", "/api/device", { key, action, name }),
+  picture: (key: string, kind: "" | Kind) => call<{ ok: boolean }>("POST", "/api/device", { key, action: "picture", kind }),
   controls: (key: string) =>
     call<{ controls: Control[] }>("GET", `/api/controls?key=${encodeURIComponent(key)}`),
   setControl: (key: string, id: string, value: number | boolean) =>

@@ -119,6 +119,7 @@ def run_tray() -> int:
         log.info("already running")
         return 0
     store = Store.load()
+    winshell.refresh_autostart()         # the app was moved: keep "Start with Windows" working
     first_launch = not store["welcomed"]
     if not store["first_run_done"]:
         # Start with Windows by default; the tray menu can switch it off again.
@@ -150,6 +151,9 @@ def run_tray() -> int:
     power.start()                        # no-op outside Windows; the poll loop also notices sleep
     devices = DeviceWatcher(app.devices_changed)
     devices.start()                      # plug/unplug: poll at once, and cache the HID device list
+    from .updates import UpdateChecker
+    app.update_checker = UpdateChecker(store, app.found_update)
+    app.update_checker.start()           # once a day, if "Check for updates" is on
 
     wire_windows(app)
     app.open_diagnostics = lambda: threading.Thread(
@@ -169,6 +173,7 @@ def run_tray() -> int:
     finally:
         power.stop()
         devices.stop()
+        app.update_checker.stop()
         app.stop()
         if getattr(app, "ui", None) is not None:
             app.ui.stop()
@@ -246,7 +251,11 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     if args.autostart:
         from . import winshell
-        winshell.set_autostart(args.autostart == "on")
+        try:
+            winshell.set_autostart(args.autostart == "on")
+        except winshell.TemporaryFolder as e:
+            print(e, file=sys.stderr)
+            return 1
         store = Store.load()                  # the installer decided: don't override at first launch
         store["first_run_done"] = True
         store.save()

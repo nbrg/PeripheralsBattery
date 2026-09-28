@@ -275,3 +275,33 @@ def test_device_settings_over_http(tmp_path):
         assert code == 400
     finally:
         ui.stop()
+
+
+def test_picture_update_and_new_settings_over_http(client, app):
+    code, _ = client.json("POST", "/api/device", {"key": "logi-1", "action": "picture", "kind": "keyboard"})
+    assert code == 200
+    state = client.json("GET", "/api/state")[1]
+    dev = next(d for d in state["devices"] if d["key"] == "logi-1")
+    assert dev["kind"] == "keyboard" and dev["picture"] == "keyboard"
+    assert client.json("POST", "/api/device", {"key": "logi-1", "action": "picture", "kind": "x"})[0] == 400
+    assert "update" not in state
+    app.found_update("99.0.0", "https://example/release", announce=False)
+    assert client.json("GET", "/api/state")[1]["update"]["version"] == "99.0.0"
+    code, res = client.json("POST", "/api/settings", {"icon_colour": "black", "hide_off_after": 30})
+    assert code == 200 and app.store["icon_colour"] == "black" and app.store["hide_off_after"] == 30
+    assert client.json("POST", "/api/settings", {"icon_colour": "pink"})[0] == 400
+
+
+def test_autostart_refusal_is_shown(app, tmp_path):
+    from peribatt import winshell
+
+    def refuse(on):
+        raise winshell.TemporaryFolder(winshell.TEMP_FOLDER_MESSAGE)
+    ui = web.WebUi(app, api=FakeApi(), opener=lambda url: None, set_autostart=refuse,
+                   autostart_enabled=lambda: False)
+    c = Client(ui)
+    try:
+        code, res = c.json("POST", "/api/settings", {"autostart": True})
+        assert code == 400 and "temporary folder" in res["errors"][0]
+    finally:
+        ui.stop()

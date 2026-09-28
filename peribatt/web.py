@@ -229,15 +229,18 @@ class WebUi:
             return out
         kw = {"autostart_enabled": self.autostart_enabled} if self.autostart_enabled else {}
         out["settings"] = prefs.current(app.store, **kw)
+        if app.update_available:
+            out["update"] = {"version": app.update_available[0], "url": app.update_available[1]}
         with app.lock:
             items = list(app.readings.items())
         for key, r in items:
             eff = app.effective(r)
             out["devices"].append({
-                "key": key, "name": eff.name, "original": r.name, "kind": r.kind,
+                "key": key, "name": eff.name, "original": r.name, "kind": eff.kind,
                 "level": r.level, "charging": r.charging, "online": r.online, "muted": eff.muted,
                 "note": r.note, "hidden": key in app.store["hidden"],
                 "configurable": app.has_controls(key),
+                "picture": app.store["kinds"].get(key, ""),       # "" = automatic
                 "estimate": app.estimator.estimate(eff),
                 "icon": f"/api/icon?key={key}&v={r.level}-{int(r.charging)}-{int(r.online)}",
             })
@@ -252,7 +255,10 @@ class WebUi:
         if errors:
             return {"ok": False, "errors": errors}
         kw = {"set_autostart": self.set_autostart} if self.set_autostart else {}
-        prefs.apply(self.app, clean, **kw)
+        try:
+            prefs.apply(self.app, clean, **kw)
+        except OSError as e:                      # e.g. autostart refused from a temporary folder
+            return {"ok": False, "errors": [str(e)], "settings": self.state()["settings"]}
         return {"ok": True, "settings": self.state()["settings"]}
 
     def device_controls(self, key: str) -> dict:
@@ -271,6 +277,11 @@ class WebUi:
             return {"ok": False, "error": "unknown device"}
         if action == "rename":
             app.rename(key, str(body.get("name", ""))[:60])
+        elif action == "picture":
+            try:
+                app.set_kind(key, str(body.get("kind", "")))
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
         elif action in ("hide", "show"):
             prefs.set_hidden(app, key, action == "hide")
         elif action == "forget":

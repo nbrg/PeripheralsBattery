@@ -28,6 +28,10 @@ SLOW_SOURCE = 5.0            # log a warning when one provider takes longer than
 SEARCHING = "Peripherals Battery: looking for devices…"
 NOTHING_FOUND = "Peripherals Battery: no devices found yet - right-click for Diagnostics"
 ALL_HIDDEN = "Peripherals Battery: all devices are hidden - right-click to show them"
+ALL_OFF = "Peripherals Battery: your devices are switched off"
+# Pictures a device can be given by hand ("" = the one its source chose).
+KIND_CHOICES = (("", "Automatic"), ("mouse", "Mouse"), ("keyboard", "Keyboard"),
+                ("headset", "Headset"), ("gamepad", "Controller"), ("device", "Other"))
 # Devices from these sources vanish (rather than turn grey) when the source is switched off.
 SOURCE_SWITCHES = {"bt-": "bluetooth", "xinput-": "xinput"}
 
@@ -73,7 +77,7 @@ class App:
         self.sources = list(sources)
         self.estimator = estimator or Estimator()
         self.theme_probe = light_taskbar
-        self.light = light_taskbar()
+        self.light = self._pick_light()
         self.mic_toggle: Optional[Callable[[], None]] = None
         self.open_settings: Optional[Callable[[], None]] = None    # set when a UI is available
         self.open_learn: Optional[Callable[[], None]] = None
@@ -96,6 +100,9 @@ class App:
         self.open_diagnostics: Optional[Callable[[], None]] = None
         self.forgotten: set = set()                    # forgotten while off: ignore until seen again
         self._placeholder_light: Optional[bool] = None
+        self.offline_since: Dict[str, float] = {}      # key -> when it was first seen off
+        self.update_available: Optional[tuple] = None  # (version, url) of a newer release
+        self.update_checker = None
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -105,11 +112,24 @@ class App:
             self.readings[key] = Reading(key, info.get("name", key), info.get("kind", DEVICE),
                                          info.get("level"), online=False, note="not found yet")
 
+    def _pick_light(self) -> bool:
+        """Draw for a light taskbar? "auto" asks Windows; a fixed colour is for
+        see-through taskbars (TranslucentTB...) where the theme says nothing useful."""
+        colour = self.store["icon_colour"]
+        if colour == "white":
+            return False                               # white icons, as on a dark taskbar
+        if colour == "black":
+            return True
+        return bool(self.theme_probe())
+
     def effective(self, r: Reading) -> Reading:
-        """The reading as shown: user-chosen name, Windows mic mute folded in."""
+        """The reading as shown: user-chosen name and picture, Windows mic mute folded in."""
         alias = self.store["names"].get(r.key)
         if alias and alias != r.name:
             r = r.with_(name=alias)
+        kind = self.store["kinds"].get(r.key)
+        if kind and kind != r.kind:
+            r = r.with_(kind=kind)
         if not r.online:
             return r
         muted = r.muted or (self.store["windows_mute"] and self.windows_muted and r.kind == HEADSET)
@@ -143,6 +163,9 @@ class App:
                     fresh[key] = old            # remembered from last run: show it greyed
             for r in fresh.values():
                 self._update(r)
+            for key in [k for k in self.shown if k != PLACEHOLDER and k in self.readings]:
+                if self.expired(key):
+                    self._draw(key)                    # off for too long: leaves the tray
             self._sync_placeholder()
         self._flush_menus()
 
@@ -168,6 +191,10 @@ class App:
             r = r.with_(level=prev.level)          # keep the last known level on a grey icon
         self.readings[r.key] = r
         if r.online:
+            self.offline_since.pop(r.key, None)
+        else:
+            self.offline_since.setdefault(r.key, self.clock())
+        if r.online:
             self.estimator.record(r, self.clock())
             self.store.devices[r.key] = {"name": r.name, "kind": r.kind, "level": r.level}
         self._draw(r.key)                      # before alerts: a notification needs the icon
@@ -189,12 +216,21 @@ class App:
         return all(self.store[setting] for prefix, setting in SOURCE_SWITCHES.items()
                    if key.startswith(prefix))
 
+    def expired(self, key: str) -> bool:
+        """Switched off for longer than the "remove after" setting."""
+        minutes = self.store["hide_off_after"]
+        since = self.offline_since.get(key)
+        return bool(minutes) and since is not None and self.clock() - since >= minutes * 60
+
+    def in_tray(self, key: str) -> bool:
+        return self.visible(key) and not self.expired(key)
+
     def flashing(self, r: Reading) -> bool:
         return style.should_flash(self.effective(r), self.store["flash_on_mute"])
 
     def _draw(self, key: str) -> None:
         r = self.readings[key]
-        if not self.visible(key):
+        if not self.in_tray(key):
             if key in self.shown:
                 self.backend.remove(key)
                 self.shown.pop(key, None)
@@ -226,6 +262,7 @@ class App:
 
     def redraw_all(self) -> None:
         with self.lock:
+            self.light = self._pick_light()
             for key in list(self.readings):
                 self._draw(key)
             self._sync_placeholder()
@@ -237,6 +274,8 @@ class App:
         visible = [k for k in self.shown if k != PLACEHOLDER]
         if any(not self.visible(k) for k in self.readings):
             title = ALL_HIDDEN
+        elif self.readings and all(self.expired(k) for k in self.readings):
+            title = ALL_OFF
         else:
             title = NOTHING_FOUND if self.polled_once else SEARCHING
         img = None
@@ -311,6 +350,23 @@ class App:
             if invalidate:
                 invalidate()
         self.refresh_event.set()
+
+    def set_kind(self, key: str, kind: str) -> None:
+        """The picture for one device; "" goes back to the one its source chose."""
+        if kind not in dict(KIND_CHOICES):
+            raise ValueError(f"unknown picture {kind!r}")
+        kinds = {k: v for k, v in self.store["kinds"].items() if k != key}
+        if kind:
+            kinds[key] = kind
+        self.set_setting("kinds", kinds)
+
+    def found_update(self, version: str, url: str, announce: bool) -> None:
+        """A newer release is out (from the update checker's thread)."""
+        self.update_available = (version, url)
+        if announce:
+            self.backend.notify(None, "Update available",
+                                f"Peripherals Battery {version} is out. Right-click the icon to get it.")
+        self.backend.refresh_menus()
 
     def hide(self, key: str) -> None:
         hidden = list(self.store["hidden"])
@@ -387,9 +443,7 @@ class App:
 
     # -- loops ------------------------------------------------------------
     def poll_once(self) -> List[Reading]:
-        light = self.theme_probe()
-        if light != self.light:
-            self.light = light
+        if self._pick_light() != self.light:
             self.redraw_all()
         results: List[Reading] = []
         for s in self.sources:

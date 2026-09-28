@@ -7,10 +7,11 @@ import os
 import subprocess
 import sys
 import threading
+import webbrowser
 from typing import Dict
 
 from . import DISPLAY_NAME, __version__, trayicon, winshell
-from .app import PLACEHOLDER, App
+from .app import KIND_CHOICES, PLACEHOLDER, App
 from .config import app_dir
 from .model import HEADSET
 
@@ -110,6 +111,14 @@ class PystrayBackend:
             except Exception:
                 log.exception("could not rebuild a tray menu")
 
+    def _toggle_autostart(self):
+        try:
+            winshell.set_autostart(not winshell.autostart_enabled())
+        except winshell.TemporaryFolder as e:
+            self.notify(None, "Start with Windows", str(e))
+        except OSError:
+            log.exception("could not change Start with Windows")
+
     # -- menu -------------------------------------------------------------
     def _menu(self, key):
         p = self.pystray
@@ -128,10 +137,23 @@ class PystrayBackend:
         def refresh():
             app.refresh_event.set()
 
+        def pick_kind(kind):
+            # pystray passes (icon, item) to actions with parameters: close over kind instead
+            return Item(dict(KIND_CHOICES)[kind], lambda: app.set_kind(key, kind),
+                        checked=lambda _i: s["kinds"].get(key, "") == kind, radio=True)
+
+        def toggle_updates():
+            app.set_setting("update_check", not s["update_check"])
+            if s["update_check"] and app.update_checker is not None:
+                app.update_checker.check_soon()
+
         def items():
             # Rebuilt every time the menu is refreshed, so the status lines
             # at the top always match the icons.
             out = [Item(line, None, enabled=False) for line in (app.menu_status() or ["No devices yet"])]
+            if app.update_available:
+                version, url = app.update_available
+                out.append(Item(f"Download version {version}…", lambda: webbrowser.open(url)))
             out.append(Menu.SEPARATOR)
             # Left-click runs the default item: mic toggle on headsets, else the settings window.
             reading = app.readings.get(key)
@@ -155,13 +177,21 @@ class PystrayBackend:
                     toggle("show_number", "Show percentage instead of picture"),
                     toggle("flash_on_mute", "Blink headset while mic is muted"),
                     toggle("windows_mute", "Count Windows mic mute as muted"),
-                    toggle("notify_full", "Notify when fully charged"))),
+                    toggle("notify_full", "Notify when fully charged"),
+                    Item("Icon colour", Menu(*(radio("icon_colour", v, lbl) for v, lbl in
+                                               (("auto", "Follow the taskbar"), ("white", "White"),
+                                                ("black", "Black"))))),
+                    Item("Remove switched-off devices", Menu(*(radio("hide_off_after", v, lbl) for v, lbl in
+                                                               ((0, "Never"), (5, "After 5 minutes"),
+                                                                (30, "After 30 minutes"),
+                                                                (120, "After 2 hours"))))))),
                 Item("Sources", Menu(
                     toggle("bluetooth", "Windows Bluetooth devices"),
                     toggle("xinput", "Xbox-compatible controllers"))),
                 Menu.SEPARATOR,
             ]
             if key != PLACEHOLDER:
+                out.append(Item("Picture", Menu(*(pick_kind(k) for k, _ in KIND_CHOICES))))
                 out.append(Item("Hide this device", lambda: app.hide(key)))
             if s["hidden"]:
                 out.append(Item("Show hidden devices", lambda: app.unhide_all()))
@@ -172,21 +202,15 @@ class PystrayBackend:
                 Item("Open data folder", lambda: _open_folder()),
             ]
             if sys.platform == "win32":
-                out.append(Item("Start with Windows", lambda: _toggle_autostart(),
+                out.append(Item("Start with Windows", lambda: self._toggle_autostart(),
                                 checked=lambda _i: winshell.autostart_enabled()))
+            out.append(Item("Check for updates", toggle_updates, checked=lambda _i: bool(s["update_check"])))
             out += [Menu.SEPARATOR,
                     Item(f"{DISPLAY_NAME} {__version__}", None, enabled=False),
                     Item("Exit", lambda: app.stop())]
             return out
 
         return Menu(items)
-
-
-def _toggle_autostart():
-    try:
-        winshell.set_autostart(not winshell.autostart_enabled())
-    except OSError:
-        log.exception("could not change Start with Windows")
 
 
 def _open_folder():
