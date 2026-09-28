@@ -108,7 +108,9 @@ class FakeHidppChannel(QueueHandle):
         index_to_feature = {v: k for k, v in dev.features.items()}
         feature = index_to_feature.get(fi)
         out: List[int] = []
-        if feature == 0x0000 and fn == 0:
+        if feature == 0x0000 and fn == 1:                # ping: protocol 4.2, echo
+            out = [4, 2, params[2]]
+        elif feature == 0x0000 and fn == 0:
             fid = (params[0] << 8) | params[1]
             out = [dev.features.get(fid, 0)]
         elif feature == 0x0005 and fn == 0:

@@ -42,14 +42,20 @@ USAGE_SHORT, USAGE_LONG = 0x0001, 0x0002
 SHORT, LONG = 0x10, 0x11
 LONG_LEN = 20
 SW_ID = 0x0B
+# The software id is rotated per request, so a late reply to an earlier request
+# (one that timed out) can never be taken for the answer to the current one.
+SW_IDS = (0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F)
 WIRED = 0xFF
 RECEIVER_SLOTS = range(1, 7)
 SILENT_BACKOFF = 600.0      # a slot that never answered is skipped for 10 minutes
+WAKE_TIMEOUT = 2.0          # a dozing LIGHTSPEED radio can take ~0.5 s to answer at first
 
 ERR_V1, ERR_V2 = 0x8F, 0xFF
 ERR_UNKNOWN_DEVICE = 0x08
+ERR_UNREACHABLE = 0x09
 
 F_ROOT = 0x0000
+FN_PING = 1
 F_DEVICE_INFO = 0x0003
 F_NAME = 0x0005
 F_UNIFIED = 0x1004
@@ -79,20 +85,20 @@ class HidppError(Exception):
 
 
 def build_request(index: int, feature_index: int, function: int,
-                  params: Sequence[int] = ()) -> List[int]:
-    msg = [LONG, index, feature_index, ((function & 0x0F) << 4) | SW_ID, *params]
+                  params: Sequence[int] = (), swid: int = SW_ID) -> List[int]:
+    msg = [LONG, index, feature_index, ((function & 0x0F) << 4) | swid, *params]
     if len(msg) > LONG_LEN:
         raise ValueError("too many parameters for a long report")
     return msg + [0] * (LONG_LEN - len(msg))
 
 
 def match_reply(report: Sequence[int], index: int, feature_index: int,
-                function: int) -> Optional[List[int]]:
+                function: int, swid: int = SW_ID) -> Optional[List[int]]:
     """Params of ``report`` when it answers our request, ``None`` when it is
     unrelated traffic, and :class:`HidppError` when it is an error reply."""
     if len(report) < 5 or report[1] != index:
         return None
-    fn = ((function & 0x0F) << 4) | SW_ID
+    fn = ((function & 0x0F) << 4) | swid
     if report[2] in (ERR_V1, ERR_V2) and report[3] == feature_index and report[4] == fn:
         code = report[5] if len(report) > 5 else 0
         raise HidppError(code, legacy=report[2] == ERR_V1)
@@ -120,7 +126,7 @@ def decode_battery(feature: int, p: Sequence[int]) -> Tuple[Optional[int], bool]
     A full battery that is still plugged in counts as charging (green frame)."""
     if feature == F_UNIFIED:
         level = p[0] if 0 < p[0] <= 100 else _approx_from_flags(p[1])
-        return level, p[2] in (1, 2, 3)
+        return level, p[2] in (1, 2, 3, 4)          # 4 = slow charging
     if feature == F_STATUS:
         level = p[0] if 0 < p[0] <= 100 else None
         return level, p[2] in (1, 2, 3, 4)
@@ -139,6 +145,16 @@ def _approx_from_flags(flags: int) -> Optional[int]:
     return None
 
 
+def instance(path) -> str:
+    r"""The device instance in a Windows HID path, without its collection number:
+    ``\\?\HID#VID_046D&PID_C539&MI_02&Col02#7&2b1f0a3&0&0001#{...}`` -> ``7&2b1f0a3&0``.
+    A receiver's short and long collections differ only in that last number, so
+    they share this; a second receiver of the same kind does not. Empty elsewhere."""
+    text = path.decode("ascii", "ignore") if isinstance(path, (bytes, bytearray)) else str(path or "")
+    parts = text.split("#")
+    return parts[2].lower().rsplit("&", 1)[0] if len(parts) > 2 else ""
+
+
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "device"
 
@@ -152,6 +168,7 @@ class Channel:
         self.handles = [h for h in (long_handle, short_handle) if h is not None]
         self.long = long_handle
         self.clock = clock
+        self._swid = 0
 
     def close(self):
         for h in self.handles:
@@ -169,16 +186,28 @@ class Channel:
     def call(self, index: int, feature_index: int, function: int,
              params: Sequence[int] = (), timeout: float = 1.0) -> List[int]:
         self._drain()
-        self.long.write(build_request(index, feature_index, function, params))
+        self._swid = (self._swid + 1) % len(SW_IDS)
+        swid = SW_IDS[self._swid]
+        self.long.write(build_request(index, feature_index, function, params, swid))
         deadline = self.clock() + timeout
         while self.clock() < deadline:
             for i, h in enumerate(self.handles):
                 report = h.read(64, 40 if i == 0 else 0)
                 if report:
-                    params_out = match_reply(report, index, feature_index, function)
+                    params_out = match_reply(report, index, feature_index, function, swid)
                     if params_out is not None:
                         return params_out
         raise TimeoutError(f"no reply from device {index:#x}")
+
+    def ping(self, index: int, timeout: float = WAKE_TIMEOUT) -> None:
+        """Is a device in this slot, and awake? Raises like :meth:`call`. The first
+        request after a pause wakes the radio, so it gets the long timeout; a HID++ 2.0
+        error still means the device answered."""
+        try:
+            self.call(index, F_ROOT, FN_PING, (0, 0, 0x5A), timeout=timeout)
+        except HidppError as e:
+            if e.legacy:
+                raise
 
     def feature_index(self, index: int, feature_id: int) -> Optional[int]:
         try:
@@ -248,15 +277,21 @@ class LogitechSource:
         self.log: List[str] = []
 
     @staticmethod
-    def slot_id(pid: int, index: int) -> str:
-        return f"{pid:04x}:{index}"
+    def slot_id(pid: int, index: int, instance: str = "") -> str:
+        return f"{pid:04x}:{index}" + (f"@{instance}" if instance else "")
 
-    def _collections(self) -> Dict[int, Dict[int, bytes]]:
-        groups: Dict[int, Dict[int, bytes]] = {}
+    def _collections(self) -> Dict[Tuple[int, str], Dict[int, bytes]]:
+        """(product id, receiver instance) -> {usage: path}. Two receivers of the same
+        kind share a product id (every Unifying receiver is C52B), so the instance
+        from the path keeps them apart; it is left empty when a product id appears
+        only once, which keeps the keys of the usual single receiver short."""
+        groups: Dict[Tuple[int, str], Dict[int, bytes]] = {}
         for d in self.api.enumerate(LOGITECH_VID):
             if d.get("usage_page") == VENDOR_PAGE and d.get("usage") in (USAGE_SHORT, USAGE_LONG):
-                groups.setdefault(d["product_id"], {})[d["usage"]] = d["path"]
-        return {pid: g for pid, g in groups.items() if USAGE_LONG in g}
+                groups.setdefault((d["product_id"], instance(d.get("path"))), {})[d["usage"]] = d["path"]
+        groups = {k: g for k, g in groups.items() if USAGE_LONG in g}
+        pids = [pid for pid, _ in groups]
+        return {(pid, inst if pids.count(pid) > 1 else ""): g for (pid, inst), g in groups.items()}
 
     def _open(self, paths: Dict[int, bytes]) -> Channel:
         long_h = self.api.open(paths[USAGE_LONG])
@@ -268,9 +303,10 @@ class LogitechSource:
                 pass
         return Channel(long_h, short_h, self.clock)
 
-    def _read(self, ch: Channel, pid: int, index: int) -> Optional[Reading]:
-        sid = self.slot_id(pid, index)
+    def _read(self, ch: Channel, pid: int, index: int, inst: str = "") -> Optional[Reading]:
+        sid = self.slot_id(pid, index, inst)
         try:
+            ch.ping(index)
             prof = self.profiles.get(sid)
             if prof is None:
                 prof = discover(ch, index)
@@ -284,6 +320,9 @@ class LogitechSource:
             self.profiles.pop(sid, None)
             if e.legacy and e.code == ERR_UNKNOWN_DEVICE:
                 self.known.pop(sid, None)       # slot is empty
+            elif e.legacy and e.code == ERR_UNREACHABLE:
+                self.log.append(f"{sid}: paired, switched off or out of range")
+                return None
             self.log.append(f"{sid}: {e}")
             return None
         except TimeoutError as e:
@@ -303,29 +342,31 @@ class LogitechSource:
         groups = self._collections()
         if not groups:
             self.log.append("no Logitech HID++ collection (FF00:0002) found")
-        for pid, paths in groups.items():
-            self.log.append(f"{pid:04x}: collections {sorted(paths)}")
+        for (pid, inst), paths in groups.items():
+            where = f"{pid:04x}" + (f"@{inst}" if inst else "")
+            self.log.append(f"{where}: collections {sorted(paths)}")
             try:
                 ch = self._open(paths)
             except OSError as e:
-                self.log.append(f"{pid:04x}: open failed: {e}")
+                self.log.append(f"{where}: open failed: {e}")
                 continue
             try:
                 for index in (RECEIVER_SLOTS if pid in RECEIVERS else (WIRED,)):
-                    if self.silent.get(self.slot_id(pid, index), 0) > self.clock():
+                    if self.silent.get(self.slot_id(pid, index, inst), 0) > self.clock():
                         continue
-                    r = self._read(ch, pid, index)
+                    r = self._read(ch, pid, index, inst)
                     if r:
                         out.append(r)
             except OSError as e:
-                self.log.append(f"{pid:04x}: {e}")
+                self.log.append(f"{where}: {e}")
             finally:
                 ch.close()
+        present = {pid for pid, _ in groups}
         online = {r.key for r in out}
         for sid, info in list(self.known.items()):
             if info["key"] not in online:
                 pid = int(sid.split(":")[0], 16)
-                note = "switched off" if pid in groups else "not connected"
+                note = "switched off" if pid in present else "not connected"
                 out.append(Reading(info["key"], info["name"], info.get("kind", DEVICE),
                                    None, False, online=False, note=note))
         return out

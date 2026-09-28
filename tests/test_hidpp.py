@@ -89,7 +89,7 @@ def test_second_poll_skips_discovery():
     src.poll()
     first = mouse.calls
     src.poll()
-    assert mouse.calls - first == 1                   # just the battery request
+    assert mouse.calls - first == 2                   # just a wake-up ping and the battery request
 
 
 def test_switched_off_mouse_stays_as_offline_reading():
@@ -154,3 +154,42 @@ def test_open_failure_is_contained():
 def test_slug():
     assert hidpp.slug("G PRO Wireless!") == "g-pro-wireless"
     assert hidpp.slug("***") == "device"
+
+
+def test_receiver_instance_from_a_windows_path():
+    p = rb"\\?\HID#VID_046D&PID_C539&MI_02&Col02#7&2b1f0a3&0&0001#{4d1e55b2-f16f-11cf-88cb-001111000030}"
+    assert hidpp.instance(p) == "7&2b1f0a3&0"
+    assert hidpp.instance(p.replace(b"Col02", b"Col01").replace(b"&0001#", b"&0000#")) == "7&2b1f0a3&0"
+    assert hidpp.instance(b"/dev/hidraw3") == ""
+
+
+def test_two_receivers_of_the_same_kind_are_both_read():
+    def path(inst, col):
+        return rf"\\?\HID#VID_046D&PID_C52B&MI_02&Col0{col}#{inst}&000{col - 1}#{{x}}".encode()
+
+    api = FakeApi()
+    for inst, dev in (("7&aaa&0", FakeLogiDevice(name="MX Keys", dev_type=0, unit=b"\x01\x02\x03\x04")),
+                      ("7&bbb&0", FakeLogiDevice(name="MX Master 3", unit=b"\x05\x06\x07\x08"))):
+        long_h = FakeHidppChannel({1: dev})
+        api.add(0x046D, 0xC52B, path(inst, 2), long_h, 0xFF00, 0x0002)
+    names = sorted(r.name for r in LogitechSource(api=api, clock=FakeClock()).poll())
+    assert names == ["MX Keys", "MX Master 3"]
+
+
+def test_a_late_reply_to_an_earlier_request_is_not_taken_as_the_answer():
+    from peribatt.hidpp import Channel
+
+    class Late(QueueHandle):
+        """Answers each request only after the next one was sent."""
+        pending = None
+
+        def on_write(self, data):
+            if self.pending:
+                self.inbox.append(self.pending)
+            self.pending = [*data[:4], 42] + [0] * 15
+
+    ch = Channel(Late(), clock=FakeClock())
+    with pytest.raises(TimeoutError):
+        ch.call(1, 0x06, 0, timeout=0.2)
+    with pytest.raises(TimeoutError):
+        ch.call(1, 0x06, 0, timeout=0.2)          # the first request's answer is not ours
