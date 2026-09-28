@@ -123,6 +123,50 @@ def test_status_reports_do_not_flip_a_working_headset_off():
         assert src.readings()[0].online
 
 
+def test_unplugged_dongle():
+    api, h = dongle()
+    seen = []
+    src = HyperXSource(api=api, on_change=seen.append, threaded=False)
+    src.poll()
+    src._lost()
+    assert h.closed and seen[-1].note == "dongle unplugged"
+    assert src.readings()[0].online is False
+
+
+def test_requests_are_sent_one_at_a_time():
+    """A Cloud Flight S answered only the last of three requests sent back to back
+    (diagnostics from a real one: only 'bb 03' replies). Each request now waits for
+    the previous one's reply."""
+    import time
+
+    class OneAtATime(QueueHandle):
+        busy = False
+
+        def on_write(self, data):
+            if self.inbox:                            # a reply not read yet: the dongle drops it
+                OneAtATime.busy = True
+                return
+            cmd = data[15]
+            self.inbox.append(reply(cmd, b4=1, b7=64 if cmd == CMD_BATTERY else 0))
+
+    api = FakeApi()
+    h = OneAtATime()
+    api.add(0x0951, 0x16EA, b"v", h, usage_page=0xFF13, usage=1)
+    src = HyperXSource(api=api)
+    try:
+        src.poll()
+        end = time.time() + 3
+        while len(h.written) < 3 and time.time() < end:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        assert [w[15] for w in h.written] == [CMD_STATUS, CMD_BATTERY, CMD_CHARGE]
+        assert not OneAtATime.busy                    # never written over a pending reply
+        r = src.readings()[0]
+        assert r.online and r.level == 64
+    finally:
+        src.close()
+
+
 def test_nothing_reported_before_the_dongle_was_ever_seen():
     assert HyperXSource(api=FakeApi(), threaded=False).poll() == []
 

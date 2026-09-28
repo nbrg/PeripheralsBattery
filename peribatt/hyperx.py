@@ -55,6 +55,7 @@ CMD_STATUS, CMD_BATTERY, CMD_CHARGE, CMD_MUTE = 0x01, 0x02, 0x03, 0x08
 CMD_SET_AUTO_OFF, CMD_SIDETONE, CMD_GET_AUTO_OFF = 0x18, 0x19, 0x1A
 AUTO_OFF_CHOICES = (10, 20, 30)          # minutes, as NGENUITY offers them
 ANSWER_WAIT = 1.5                        # seconds to wait for the headset to answer a setting
+ANSWER_TIMEOUT = 1.0                     # per queued request, before the next one is sent
 REPLY_ID, MAGIC = 0x0B, 0xBB
 
 _BASE = bytes([0x06, 0x00, 0x02, 0x00, 0x9A, 0x00, 0x00, 0x68,
@@ -172,6 +173,9 @@ class HyperXSource:
         self._answered = threading.Condition(self._lock)   # a settings reply came in
         self._handles: List[object] = []
         self._writers: List[object] = []   # collections requests go to (narrowed on a reply)
+        self._queue: deque = deque()       # commands waiting to be sent, one at a time
+        self._replied: set = set()         # commands answered since they were last sent
+        self._sender: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self.log: deque = deque(maxlen=50)      # diagnostics; bounded, it is never cleared
 
@@ -242,6 +246,8 @@ class HyperXSource:
             return
         log.debug("hyperx %s -> %s", hexdump(report, 10), changes)
         with self._lock:
+            self._replied.add(report[3])             # the queued sender waits for this
+            self._answered.notify_all()
             if handle is not None and handle in self._writers and len(self._writers) > 1:
                 self._writers = [handle]             # this collection answers: use only it
                 self.log.append("found the collection that answers")
@@ -270,10 +276,42 @@ class HyperXSource:
                 raise e from None
 
     def _send(self, *cmds: int) -> None:
+        """Queue requests. The dongle handles one at a time: sent back to back, only
+        the last one was answered (a Cloud Flight S never replied to the battery
+        request between status and charging). So a sender thread writes one, waits
+        for its reply (or ANSWER_TIMEOUT), then writes the next."""
+        if not self.threaded:
+            for cmd in cmds:                         # tests drive replies by hand
+                self._write_all(packet(cmd))
+            return
+        with self._lock:
+            for cmd in cmds:
+                if cmd not in self._queue:
+                    self._queue.append(cmd)
+            if self._sender is None or not self._sender.is_alive():
+                self._sender = threading.Thread(target=self._send_queued, daemon=True,
+                                                name="hyperx-sender")
+                self._sender.start()
+
+    def _send_queued(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue or not self._writers:
+                    self._queue.clear()
+                    return
+                cmd = self._queue.popleft()
+                self._replied.discard(cmd)
+            if not self._write_all(packet(cmd)):
+                return
+            with self._lock:
+                if not self._answered.wait_for(lambda c=cmd: c in self._replied, ANSWER_TIMEOUT):
+                    self.log.append(f"no reply to command {cmd:#04x}")
+
+    def _write_all(self, data: bytes) -> bool:
+        """Writes to every collection still taking requests; False when none is left."""
         for writer in list(self._writers):
             try:
-                for cmd in cmds:
-                    self._write(writer, packet(cmd))
+                self._write(writer, data)
             except (OSError, ValueError) as e:
                 self.log.append(f"write: {e}")
                 with self._lock:
@@ -282,7 +320,8 @@ class HyperXSource:
                     gone = not self._writers
                 if gone:
                     self._lost()                     # nothing takes requests: unplugged
-                    return
+                    return False
+        return True
 
     def poll(self) -> List[Reading]:
         with self._lock:
