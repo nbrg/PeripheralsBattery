@@ -33,8 +33,9 @@ def test_decode_known_replies():
     assert decode(reply(CMD_CHARGE, b4=0)) == {"charging": False}
     assert decode(reply(0x08, b4=1)) == {"muted": True}
     assert decode(reply(0x08, b4=0)) == {"muted": False}
-    assert decode(reply(CMD_STATUS, b4=1)) == {"online": True}
-    assert decode(reply(CMD_STATUS, b4=4)) == {"online": True}
+    assert decode(reply(CMD_STATUS, b4=1)) == {"online": True, "on_cable": False}
+    assert decode(reply(CMD_STATUS, b4=4)) == {"online": True, "on_cable": False}
+    assert decode(reply(CMD_STATUS, b4=3)) == {"online": True, "on_cable": True}
     # other status values are not "off" on every dongle (the Flight S flickered)
     assert decode(reply(CMD_STATUS, b4=2)) == {}
     assert decode(reply(CMD_STATUS, b4=0)) == {}
@@ -243,3 +244,48 @@ def test_collections_that_reject_requests_are_dropped():
     src = HyperXSource(api=api, threaded=False)
     src.poll()
     assert src._writers == [good] and src.state.present
+
+
+# --- a Cloud Flight S on its USB cable (diagnostics from a real one) ------------------
+
+def test_status_03_means_on_the_cable_and_charging():
+    """On battery the headset answered 'bb 01 01'; plugged in, 'bb 01 03' - and it
+    stopped answering the battery request."""
+    api, _ = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    src.feed(reply(CMD_BATTERY, b7=39))
+    src.feed(reply(CMD_STATUS, 1))
+    assert not src.readings()[0].charging
+    src.feed(reply(CMD_STATUS, 3))
+    r = src.readings()[0]
+    assert r.online and r.charging and r.level == 39
+    for _ in range(MISSED_POLLS_OFFLINE + 1):           # no battery answers while charging...
+        src.poll()
+        src.feed(reply(CMD_STATUS, 3))                  # ...but it keeps answering the status
+    r = src.readings()[0]
+    assert r.online and r.charging and r.level is None  # alive, charging, no stale level
+    src.feed(reply(CMD_STATUS, 1))                      # unplugged
+    src.feed(reply(CMD_BATTERY, b7=52))
+    r = src.readings()[0]
+    assert not r.charging and r.level == 52
+
+
+def test_the_headsets_own_usb_device_means_charging():
+    api, _ = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.poll()
+    src.feed(reply(CMD_BATTERY, b7=60))
+    assert not src.readings()[0].charging
+    api.add(0x0951, 0x16EB, b"cable", QueueHandle(), usage_page=0xFF00, usage=1)
+    [r] = src.poll()
+    assert r.charging
+
+
+def test_undecoded_replies_still_count_as_answers():
+    """'no reply to command 0x01' was logged for status replies the app did not
+    decode, and each cost the sender a one-second wait."""
+    api, _ = dongle()
+    src = HyperXSource(api=api, threaded=False)
+    src.feed(reply(CMD_STATUS, 7))                      # a value the app does not read
+    assert CMD_STATUS in src._replied

@@ -1,5 +1,5 @@
 """Peripherals Battery - a tiny Windows tray app for wireless gear battery levels."""
 
-__version__ = "0.6.8"
+__version__ = "0.6.9"
 APP_NAME = "PeripheralsBattery"
 DISPLAY_NAME = "Peripherals Battery"

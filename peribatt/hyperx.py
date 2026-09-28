@@ -10,8 +10,9 @@ Protocol (as documented by the HyperHeadset project, MIT):
 
 * reply   - input report ``0b 00 bb <cmd> <data...>``
 
-      cmd 0x01  link status  byte 4: 1 or 4 = headset connected (other values
-                differ between dongles and are not read as "off")
+      cmd 0x01  link status  byte 4: 1 or 4 = headset connected, 3 = connected and
+                on its USB cable (a Cloud Flight S says 01 on battery, 03 plugged
+                in); other values differ between dongles and are not read as "off"
                 (asking for 0x01 also makes the dongle report the mute state)
       cmd 0x02  battery      byte 7: percent
       cmd 0x03  charging     byte 4: 0 no, 1 charging, 2 full, other = error
@@ -57,6 +58,10 @@ AUTO_OFF_CHOICES = (10, 20, 30)          # minutes, as NGENUITY offers them
 ANSWER_WAIT = 1.5                        # seconds to wait for the headset to answer a setting
 ANSWER_TIMEOUT = 1.0                     # per queued request, before the next one is sent
 REPLY_ID, MAGIC = 0x0B, 0xBB
+STATUS_ON_CABLE = 0x03
+# A Cloud Flight S on its USB cable shows up as a device of its own (0951:16EB,
+# collections ff00/ff42) next to its dongle (0951:16EA): the cable is in.
+HEADSET_ON_USB = {0x16EA: 0x16EB}
 
 _BASE = bytes([0x06, 0x00, 0x02, 0x00, 0x9A, 0x00, 0x00, 0x68,
                0x4A, 0x8E, 0x0A, 0x00, 0x00, 0x00, MAGIC])
@@ -96,7 +101,11 @@ def decode(report: Sequence[int]) -> Dict[str, object]:
         # other values while it is on, which made the icon flip between on and
         # off. So only "connected" is taken from it (as CubE135's Flight S monitor
         # does); "off" comes from battery requests going unanswered.
-        return {"online": True} if value in (1, 4) else {}
+        if value in (1, 4):
+            return {"online": True, "on_cable": False}
+        if value == STATUS_ON_CABLE:
+            return {"online": True, "on_cable": True}
+        return {}
     if cmd == CMD_BATTERY:
         return {"online": True, "level": r[7]} if r[7] <= 100 else {}
     if cmd == CMD_CHARGE:
@@ -116,9 +125,12 @@ class HeadsetState:
         self.present = False          # dongle plugged in
         self.online = False           # headset switched on and linked
         self.level: Optional[int] = None
-        self.charging = False
+        self.charging = False         # from a charging reply (dongles that answer one)
+        self.on_cable = False         # status 03: the headset says its cable is in
+        self.usb = False              # the headset's own USB device is present
         self.muted = False
-        self.missed = 0               # polls without any battery answer
+        self.missed = 0               # polls without any battery answer (level too old to show)
+        self.silent = 0               # polls without any answer at all (headset off)
         self.auto_off: Optional[int] = None     # minutes; None until the headset said
         self.sidetone: Optional[bool] = None    # write-only: known once set from here
 
@@ -134,11 +146,15 @@ class HeadsetState:
         before = self.reading()
         if "online" in changes:
             self.online = bool(changes["online"])
+            if self.online:
+                self.silent = 0
         if "level" in changes:
             self.level = int(changes["level"])
             self.missed = 0
         if "charging" in changes:
             self.charging = bool(changes["charging"])
+        if "on_cable" in changes:
+            self.on_cable = bool(changes["on_cable"])
         if "muted" in changes:
             self.muted = bool(changes["muted"])
         if "auto_off" in changes:
@@ -150,7 +166,12 @@ class HeadsetState:
     def reading(self) -> Reading:
         online = self.present and self.online
         note = "" if online else ("switched off" if self.present else "dongle unplugged")
-        return Reading(self.key, self.name, HEADSET, self.level, self.charging and online,
+        charging = online and (self.charging or self.on_cable or self.usb)
+        # Only a level the headset still reports: on its cable a Cloud Flight S stops
+        # answering the battery request, and its last answer is not today's level.
+        fresh = self.missed <= MISSED_POLLS_OFFLINE
+        level = self.level if (fresh or not online) else None
+        return Reading(self.key, self.name, HEADSET, level, charging,
                        online=online, muted=self.muted and online, note=note)
 
 
@@ -240,14 +261,17 @@ class HyperXSource:
 
     # -- state -----------------------------------------------------------
     def feed(self, report: Sequence[int], handle=None) -> None:
+        r = list(report)
+        if len(r) >= 4 and r[0] == REPLY_ID and r[2] == MAGIC:
+            with self._lock:
+                self._replied.add(r[3])              # answered, whatever it said
+                self._answered.notify_all()
         changes = decode(report)
         self.log.append(f"rx {hexdump(report, 12)}" + (f" -> {changes}" if changes else ""))
         if not changes:
             return
         log.debug("hyperx %s -> %s", hexdump(report, 10), changes)
         with self._lock:
-            self._replied.add(report[3])             # the queued sender waits for this
-            self._answered.notify_all()
             if handle is not None and handle in self._writers and len(self._writers) > 1:
                 self._writers = [handle]             # this collection answers: use only it
                 self.log.append("found the collection that answers")
@@ -330,8 +354,12 @@ class HyperXSource:
             if self.state.present:
                 self.seen = True
                 self.state.missed += 1
-                if self.state.missed > MISSED_POLLS_OFFLINE:
+                self.state.silent += 1
+                if self.state.silent > MISSED_POLLS_OFFLINE:
                     self.state.online = False
+                usb = HEADSET_ON_USB.get(self.state.pid)
+                self.state.usb = usb is not None and any(
+                    d.get("product_id") == usb for d in self.api.enumerate(HYPERX_VID))
         self._send(CMD_STATUS, CMD_BATTERY, CMD_CHARGE)
         return self.readings()
 
@@ -341,6 +369,7 @@ class HyperXSource:
         with self._lock:
             self.close()
             self.state.missed = 0
+            self.state.silent = 0
 
     def poll_fast(self) -> None:
         # Only while the headset is on: a switched-off headset has no mute state.
