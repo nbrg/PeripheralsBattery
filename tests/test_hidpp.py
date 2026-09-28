@@ -133,7 +133,8 @@ def test_charging_on_cable_merges_with_receiver_copy():
     api.add(0x046D, WIRED_PID, b"wired", FakeHidppChannel({0xFF: wired_mouse}), 0xFF00, 0x0002)
     src = LogitechSource(api=api, clock=FakeClock())
     [r] = merge(src.poll())
-    assert r.online and r.charging and r.level == 57
+    # on the cable, charging: the voltage is the charger's, not a level (none known yet)
+    assert r.online and r.charging and r.level is None
 
 
 def test_unified_battery_device():
@@ -193,3 +194,39 @@ def test_a_late_reply_to_an_earlier_request_is_not_taken_as_the_answer():
         ch.call(1, 0x06, 0, timeout=0.2)
     with pytest.raises(TimeoutError):
         ch.call(1, 0x06, 0, timeout=0.2)          # the first request's answer is not ours
+
+
+# --- a voltage on the charger is not a battery level -------------------------------
+
+def test_plugging_in_does_not_read_as_full():
+    """A G PRO Wireless at 74% reported 4211 mV the moment its cable went in, which
+    the voltage curve reads as 100% - and a 'fully charged' notification followed."""
+    mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))          # 3946 mV on battery
+    api, _ = receiver({1: mouse})
+    src = LogitechSource(api=api, clock=FakeClock())
+    [r] = src.poll()
+    on_battery = r.level
+    assert 70 <= on_battery <= 80 and not r.charging
+    mouse.battery = [0x10, 0x73, 0x80]                            # 4211 mV, charging, not full
+    [r] = src.poll()
+    assert r.charging and r.level == on_battery and r.note == "approximate"
+    mouse.battery = [0x10, 0x68, 0x81]                            # the mouse says: full
+    [r] = src.poll()
+    assert r.charging and r.level == 100
+
+
+def test_the_last_level_on_battery_survives_a_restart():
+    mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))
+    api, _ = receiver({1: mouse})
+    known = {}
+    LogitechSource(api=api, known=known, clock=FakeClock()).poll()
+    mouse.battery = [0x10, 0x73, 0x80]
+    [r] = LogitechSource(api=api, known=known, clock=FakeClock()).poll()    # a new session
+    assert r.level is not None and r.level < 100
+
+
+def test_charging_without_a_known_level_shows_none():
+    mouse = FakeLogiDevice(battery=(0x10, 0x73, 0x80))            # first seen on the charger
+    api, _ = receiver({1: mouse})
+    [r] = LogitechSource(api=api, clock=FakeClock()).poll()
+    assert r.charging and r.level is None

@@ -151,6 +151,8 @@ def decode_battery(feature: int, p: Sequence[int]) -> Tuple[Optional[int], bool]
         mv = (p[0] << 8) | p[1]
         if mv < 2500:            # nonsense / not measured yet
             return None, bool(p[2] & 0x80)
+        if p[2] & 0x80 and p[2] & 0x03 == VOLTAGE_FULL:
+            return 100, True     # the mouse itself says full
         return voltage_to_percent(mv), bool(p[2] & 0x80)
     if feature == F_ADC:
         mv = (p[0] << 8) | p[1]
@@ -158,6 +160,21 @@ def decode_battery(feature: int, p: Sequence[int]) -> Tuple[Optional[int], bool]
             return None, False
         return voltage_to_percent(mv), bool(p[2] & 0x02)
     return None, False
+
+
+VOLTAGE_FULL = 0x01         # 0x1001 flags, low bits while on external power: 0 charging, 1 full
+
+
+def voltage_misleads(feature: int, p: Sequence[int]) -> bool:
+    """On the charger a battery's voltage is pushed up to ~4.2 V whatever its
+    charge, so a voltage-based level reads 100% the moment the cable goes in (a
+    G PRO Wireless at 74% reported 4211 mV). True while that is the case - on
+    external power and not reported full by the device itself."""
+    if feature == F_VOLTAGE:
+        return bool(p[2] & 0x80) and p[2] & 0x03 != VOLTAGE_FULL
+    if feature == F_ADC:
+        return bool(p[2] & 0x02)
+    return False
 
 
 def _approx_from_flags(flags: int) -> Optional[int]:
@@ -351,7 +368,10 @@ class LogitechSource:
                     name = prof.name if prof.name != "Logitech device" else HEADSETS[pid]
                     prof = Profile(prof.key, name, HEADSET, prof.feature, prof.feature_index)
                 self.profiles[sid] = prof
+                before = self.known.get(sid, {})
                 self.known[sid] = {"key": prof.key, "name": prof.name, "kind": prof.kind}
+                if before.get("key") == prof.key and "level" in before:
+                    self.known[sid]["level"] = before["level"]      # same device: keep its level
             p = ch.call(index, prof.feature_index, battery_function(prof.feature))
         except HidppError as e:
             self.profiles.pop(sid, None)
@@ -374,8 +394,19 @@ class LogitechSource:
             self.log.append(f"{sid} {prof.name}: headset not connected")
             return None                          # shown greyed as "switched off"
         self.where[prof.key] = (pid, inst, index)
-        self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
-        return Reading(prof.key, prof.name, prof.kind, level, charging, online=True)
+        note = ""
+        remembered = self.known.get(sid, {})
+        if voltage_misleads(prof.feature, p):
+            # keep the last level measured on battery rather than the charger's voltage
+            level = remembered.get("level")
+            note = "approximate" if level is not None else ""
+            self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> charging, voltage not a level; "
+                            f"showing the last level on battery ({level}%)")
+        else:
+            if level is not None and not charging and sid in self.known:
+                self.known[sid] = dict(remembered, level=level)   # persisted with the slot
+            self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
+        return Reading(prof.key, prof.name, prof.kind, level, charging, online=True, note=note)
 
     def poll(self) -> List[Reading]:
         with self._io:

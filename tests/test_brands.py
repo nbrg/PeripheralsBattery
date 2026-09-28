@@ -284,13 +284,17 @@ def test_switch_pro_controller_over_bluetooth():
 
 def test_logitech_headset_battery_voltage():
     headset = FakeLogiDevice(name="G733 Gaming Headset", dev_type=8, battery_feature=hidpp.F_ADC,
-                             battery=(0x0F, 0xA0, 0x03))             # 4000 mV, connected, charging
+                             battery=(0x0F, 0xA0, 0x01))             # 4000 mV, connected
     api = FakeApi()
     api.add(0x046D, 0x0AB5, b"hs", FakeHidppChannel({0xFF: headset}), 0xFF43, 0x0202)
     src = LogitechSource(api=api, clock=FakeClock())
     [r] = src.poll()
-    assert (r.kind, r.charging, r.name) == (HEADSET, True, "G733 Gaming Headset")
+    assert (r.kind, r.charging, r.name) == (HEADSET, False, "G733 Gaming Headset")
     assert 80 <= r.level <= 90
+    level = r.level
+    headset.battery = [0x10, 0x60, 0x03]                              # on the charger
+    [r] = src.poll()
+    assert r.charging and r.level == level                            # not the charger's voltage
     headset.battery = [0x0F, 0xA0, 0x00]                              # headset off, dongle in
     [r] = src.poll()
     assert not r.online and r.note == "switched off"
