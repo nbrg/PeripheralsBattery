@@ -162,7 +162,10 @@ def test_whole_app_starts_and_exits_from_the_menu(fake_pystray, monkeypatch):
     placeholder = FakeIcon.all[0]
     assert placeholder.title.startswith("Peripherals Battery:")          # searching / nothing found
     assert placeholder.notes and "^" in placeholder.notes[0][1]          # first-launch welcome
-    assert windows and windows[0].startswith("http://127.0.0.1:")      # ...and the settings window
+    end = time.time() + 10                                             # ...and the settings window
+    while not windows and time.time() < end:
+        time.sleep(0.02)
+    assert windows and windows[0].startswith("http://127.0.0.1:")
     find(placeholder.menu, "Exit").action()
     t.join(10)
     assert result.get("rc") == 0 and placeholder.stopped
