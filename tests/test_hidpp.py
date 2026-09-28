@@ -200,29 +200,22 @@ def test_a_late_reply_to_an_earlier_request_is_not_taken_as_the_answer():
 
 def test_plugging_in_does_not_read_as_full():
     """A G PRO Wireless at 74% reported 4211 mV the moment its cable went in, which
-    the voltage curve reads as 100% - and a 'fully charged' notification followed."""
+    the voltage curve reads as 100% - and a 'fully charged' notification followed.
+    Only verified levels are shown: none while the voltage is the charger's."""
     mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))          # 3946 mV on battery
     api, _ = receiver({1: mouse})
     src = LogitechSource(api=api, clock=FakeClock())
     [r] = src.poll()
-    on_battery = r.level
-    assert 70 <= on_battery <= 80 and not r.charging
+    assert 70 <= r.level <= 80 and not r.charging
     mouse.battery = [0x10, 0x73, 0x80]                            # 4211 mV, charging, not full
     [r] = src.poll()
-    assert r.charging and r.level == on_battery and r.note == "approximate"
+    assert r.charging and r.level is None
     mouse.battery = [0x10, 0x68, 0x81]                            # the mouse says: full
     [r] = src.poll()
     assert r.charging and r.level == 100
-
-
-def test_the_last_level_on_battery_survives_a_restart():
-    mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))
-    api, _ = receiver({1: mouse})
-    known = {}
-    LogitechSource(api=api, known=known, clock=FakeClock()).poll()
-    mouse.battery = [0x10, 0x73, 0x80]
-    [r] = LogitechSource(api=api, known=known, clock=FakeClock()).poll()    # a new session
-    assert r.level is not None and r.level < 100
+    mouse.battery = [0x10, 0x40, 0x00]                            # unplugged: a real reading
+    [r] = src.poll()
+    assert not r.charging and r.level is not None and r.level < 100
 
 
 def test_charging_without_a_known_level_shows_none():
@@ -232,34 +225,8 @@ def test_charging_without_a_known_level_shows_none():
     assert r.charging and r.level is None
 
 
-def test_charge_estimate_rises_fast_then_slower_and_never_claims_full():
-    assert hidpp.charge_estimate(74, 0) == 74
-    assert hidpp.charge_estimate(40, 10, rate=1.0) == 50              # fast phase
-    assert hidpp.charge_estimate(74, 10, rate=0.8) == 81               # 6 min to the knee, then slower
-    assert hidpp.charge_estimate(74, 10_000) == 99                     # 100 only when the device says
-    assert hidpp.learned_rate(40, 60, 20) == 1.0
-    assert hidpp.learned_rate(40, 60, 5) is None                       # too short to learn from
-    # the learned rate reproduces the observed charge
-    rate = hidpp.learned_rate(50, 90, 60)
-    assert hidpp.charge_estimate(50, 60, rate) == 90
-
-
-def test_the_level_climbs_while_charging_and_the_rate_is_learned():
-    t = {"now": 1_000_000.0}
-    mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))                 # ~74% on battery
-    api, _ = receiver({1: mouse})
-    known = {}
-    src = LogitechSource(api=api, known=known, clock=FakeClock(), now=lambda: t["now"])
-    [r] = src.poll()
-    start = r.level
-    mouse.battery = [0x10, 0x73, 0x80]                                 # plugged in
-    src.poll()
-    t["now"] += 10 * 60
-    [r] = src.poll()
-    assert start < r.level < 100 and r.charging and r.note == "approximate"
-    t["now"] += 20 * 60                                                 # 30 min of charging...
-    mouse.battery = [0x10, 0x40, 0x00]                                 # ...unplugged: a real 4160 mV
-    [r] = src.poll()
-    assert not r.charging and r.level >= 95
-    [info] = known.values()
-    assert "charge_start" not in info and info["charge_rate"] > hidpp.DEFAULT_CHARGE_RATE
+def test_the_tooltip_says_why_there_is_no_level():
+    from peribatt.app import describe
+    from peribatt.model import Reading
+    text = describe(Reading("k", "G Pro Wireless Mouse", MOUSE, None, charging=True))
+    assert text == "G Pro Wireless Mouse: charging - level shows when unplugged"

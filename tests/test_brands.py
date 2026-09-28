@@ -294,7 +294,7 @@ def test_logitech_headset_battery_voltage():
     level = r.level
     headset.battery = [0x10, 0x60, 0x03]                              # on the charger
     [r] = src.poll()
-    assert r.charging and r.level == level                            # not the charger's voltage
+    assert r.charging and r.level is None and level                  # no level from the charger's voltage
     headset.battery = [0x0F, 0xA0, 0x00]                              # headset off, dongle in
     [r] = src.poll()
     assert not r.online and r.note == "switched off"

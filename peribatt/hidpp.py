@@ -177,40 +177,6 @@ def voltage_misleads(feature: int, p: Sequence[int]) -> bool:
     return False
 
 
-# Charging estimate for devices whose voltage says nothing while on the charger.
-# Li-ion charging runs at constant current up to ~80% (fast, near-linear), then
-# at constant voltage with the current tapering off (slower). The fast rate is
-# learned per device from each charge; this is the starting guess (a G PRO
-# Wireless charges fully in roughly two hours).
-DEFAULT_CHARGE_RATE = 0.8   # percent per minute below the knee
-CHARGE_KNEE = 80            # percent where charging slows down
-CHARGE_TAPER = 0.4          # rate above the knee, as a share of the fast rate
-MIN_LEARN_MINUTES = 10      # a charge shorter than this teaches nothing reliable
-
-
-def charge_estimate(start: float, minutes: float, rate: float = DEFAULT_CHARGE_RATE) -> int:
-    """The level after charging ``minutes`` from ``start`` percent. Never 100:
-    only the device saying "full" makes it 100."""
-    level, minutes = float(start), max(0.0, minutes)
-    if level < CHARGE_KNEE:
-        fast = (CHARGE_KNEE - level) / rate
-        if minutes <= fast:
-            return min(99, round(level + minutes * rate))
-        level, minutes = CHARGE_KNEE, minutes - fast
-    return min(99, round(level + minutes * rate * CHARGE_TAPER))
-
-
-def learned_rate(start: float, end: float, minutes: float) -> Optional[float]:
-    """The fast-phase rate that would have taken ``start`` to ``end`` in ``minutes``
-    (the inverse of :func:`charge_estimate`), or None when it cannot tell."""
-    if minutes < MIN_LEARN_MINUTES or end <= start:
-        return None
-    below = max(0.0, min(end, CHARGE_KNEE) - start)            # % gained in the fast phase
-    above = max(0.0, end - max(start, CHARGE_KNEE))             # % gained after the knee
-    rate = (below + above / CHARGE_TAPER) / minutes
-    return min(3.0, max(0.1, rate))
-
-
 def _approx_from_flags(flags: int) -> Optional[int]:
     for bit, pct in ((8, 90), (4, 50), (2, 20), (1, 5)):
         if flags & bit:
@@ -339,10 +305,9 @@ class LogitechSource:
     name = "logitech"
 
     def __init__(self, api=None, known: Optional[Dict[str, dict]] = None,
-                 clock: Callable[[], float] = time.monotonic, now: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.monotonic):
         self.api = api or HidApi()
         self.clock = clock
-        self.now = now                           # wall clock: a charge can span a restart
         self.profiles: Dict[str, Profile] = {}   # slot id -> profile (this session)
         # slot id -> {"key", "name", "kind"}; persisted so a mouse that is off at
         # start-up still gets its (grey) icon.
@@ -403,10 +368,7 @@ class LogitechSource:
                     name = prof.name if prof.name != "Logitech device" else HEADSETS[pid]
                     prof = Profile(prof.key, name, HEADSET, prof.feature, prof.feature_index)
                 self.profiles[sid] = prof
-                before = self.known.get(sid, {})
                 self.known[sid] = {"key": prof.key, "name": prof.name, "kind": prof.kind}
-                if before.get("key") == prof.key and "level" in before:
-                    self.known[sid]["level"] = before["level"]      # same device: keep its level
             p = ch.call(index, prof.feature_index, battery_function(prof.feature))
         except HidppError as e:
             self.profiles.pop(sid, None)
@@ -429,47 +391,16 @@ class LogitechSource:
             self.log.append(f"{sid} {prof.name}: headset not connected")
             return None                          # shown greyed as "switched off"
         self.where[prof.key] = (pid, inst, index)
-        note = ""
         if voltage_misleads(prof.feature, p):
-            level = self._charging(sid)
-            note = "approximate" if level is not None else ""
-            self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> charging; voltage is the "
-                            f"charger's, estimated {level}%")
+            # Only verified levels are shown: on the charger the voltage is the
+            # charger's, so the level is unknown until the device reports one again
+            # (unplugged, or "full" from the device itself).
+            level = None
+            self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> charging; no level while "
+                            f"on the charger (the voltage is the charger's)")
         else:
-            self._measured(sid, level, charging)
             self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
-        return Reading(prof.key, prof.name, prof.kind, level, charging, online=True, note=note)
-
-    # -- charging estimate (persisted with the slot, so it survives a restart) -----------
-    def _charging(self, sid: str) -> Optional[int]:
-        """On the charger, where the voltage says nothing: an estimate from the last
-        level measured on battery and the time spent charging."""
-        info = self.known.get(sid)
-        if info is None or info.get("level") is None:
-            return None
-        if "charge_start" not in info:               # just plugged in
-            info["charge_start"] = [info["level"], self.now()]
-        start, since = info["charge_start"]
-        minutes = (self.now() - since) / 60
-        return charge_estimate(start, minutes, info.get("charge_rate", DEFAULT_CHARGE_RATE))
-
-    def _measured(self, sid: str, level: Optional[int], charging: bool) -> None:
-        """A real level: remember it, and when a charge just ended, learn from it how
-        fast this device charges."""
-        info = self.known.get(sid)
-        if info is None or level is None:
-            return
-        session = info.pop("charge_start", None)
-        if session is not None:
-            start, since = session
-            rate = learned_rate(start, level, (self.now() - since) / 60)
-            if rate is not None:
-                old = info.get("charge_rate")
-                info["charge_rate"] = round(rate if old is None else (old + rate) / 2, 3)
-                self.log.append(f"{sid}: charged {start}% -> {level}%, now estimating "
-                                f"{info['charge_rate']} %/min")
-        if not charging or level >= 100:            # on battery, or reported full
-            info["level"] = level
+        return Reading(prof.key, prof.name, prof.kind, level, charging, online=True)
 
     def poll(self) -> List[Reading]:
         with self._io:

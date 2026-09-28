@@ -56,10 +56,14 @@ def describe(r: Reading, estimate: Optional[str] = None) -> str:
     if not r.online:
         last = f", last {r.level}%" if r.level is not None else ""
         return _clip(f"{r.name}: {r.note or 'off'}{last}")
-    parts = [f"{'~' if r.note == 'approximate' else ''}{r.level}%" if r.level is not None
-             else "level unknown"]
-    if r.charging:
-        parts.append("charging" if (r.level or 0) < 100 else "full, on charger")
+    if r.level is None and r.charging:
+        # e.g. a voltage-only mouse on its charger: no verified level until it reports one
+        parts = ["charging - level shows when unplugged"]
+    else:
+        parts = [f"{'~' if r.note == 'approximate' else ''}{r.level}%" if r.level is not None
+                 else "level unknown"]
+    if r.charging and r.level is not None:
+        parts.append("charging" if r.level < 100 else "full, on charger")
     if r.muted:
         parts.append("mic muted")
     if estimate:
@@ -85,6 +89,7 @@ class App:
         self.mic_toggle: Optional[Callable[[], None]] = None
         self.open_settings: Optional[Callable[[], None]] = None    # set when a UI is available
         self.open_learn: Optional[Callable[[], None]] = None
+        self.open_rename: Optional[Callable[[str], None]] = None    # settings window, rename dialog
         self.clock = clock
         self.readings: Dict[str, Reading] = {}
         self.shown: Dict[str, tuple] = {}         # key -> cache key of the image on screen

@@ -64,13 +64,20 @@ const useStyles = makeStyles({
 })
 
 function pageFromHash() {
-  const id = window.location.hash.replace(/^#\/?/, "")
+  const [id] = window.location.hash.replace(/^#\/?/, "").split("/")
   return NAV.some((n) => n.id === id) ? id : "devices"
+}
+
+/** "#/devices/rename/<key>": the tray's Rename… item opens the dialog for that device. */
+function renameFromHash() {
+  const m = window.location.hash.match(/^#\/?devices\/rename\/(.+)$/)
+  return m ? decodeURIComponent(m[1]) : null
 }
 
 function Shell({ dark }: { dark: boolean }) {
   const s = useStyles()
   const [page, setPage] = useState(pageFromHash)
+  const [renameKey, setRenameKey] = useState(renameFromHash)
   const [state, setState] = useState<State | null>(null)
   const [offline, setOffline] = useState(false)
 
@@ -98,7 +105,10 @@ function Shell({ dark }: { dark: boolean }) {
   }, [refresh])
 
   useEffect(() => {
-    const onHash = () => setPage(pageFromHash())
+    const onHash = () => {
+      setPage(pageFromHash())
+      setRenameKey(renameFromHash())
+    }
     window.addEventListener("hashchange", onHash)
     return () => window.removeEventListener("hashchange", onHash)
   }, [])
@@ -139,7 +149,10 @@ function Shell({ dark }: { dark: boolean }) {
 
       <main className={s.main}>
         <div className={s.content}>
-          {current === "devices" && <DevicesPage state={state} refresh={refresh} go={go} />}
+          {current === "devices" && (
+            <DevicesPage state={state} refresh={refresh} go={go} renameKey={renameKey}
+                         onRenameOpened={() => { setRenameKey(null); go("devices") }} />
+          )}
           {current === "learn" && <LearnPage />}
           {state && current === "general" && <GeneralPage state={state} save={save} />}
           {state && current === "alerts" && <AlertsPage state={state} save={save} />}

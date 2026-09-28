@@ -41,7 +41,7 @@ class FakeItem:
     def __init__(self, text, action=None, checked=None, radio=False, default=False,
                  enabled=True, visible=True):
         self.text, self.action, self.checked = text, action, checked
-        self.default, self.enabled = default, enabled
+        self.default, self.enabled, self.visible = default, enabled, visible
 
 
 class FakeMenu:
@@ -68,7 +68,7 @@ def fake_pystray(monkeypatch, tmp_path):
 
 
 def labels(menu):
-    return [i.text for i in menu.items if isinstance(i, FakeItem)]
+    return [i.text for i in menu.items if isinstance(i, FakeItem) and i.visible]
 
 
 def find(menu, text):
@@ -86,16 +86,24 @@ def make_app(tmp_path):
 
 
 def test_menu_contents_and_actions(fake_pystray, tmp_path):
+    from peribatt import __version__
     app, backend = make_app(tmp_path)
+    renamed, settings = [], []
+    app.open_rename = renamed.append
+    app.open_settings = lambda: settings.append(1)
+    app.open_diagnostics = lambda: None
     app.apply([Reading("logi-1", "PRO Wireless", MOUSE, 76)])
     icon = backend.icons["logi-1"]
     assert icon.visible and icon.title == "PRO Wireless: 76%"
-    names = labels(icon.menu)
-    assert names[0] == "PRO Wireless: 76%"
-    for expected in ("Refresh now", "Poll every", "Low battery alert", "Display", "Sources",
-                     "Hide this device", "Forget disconnected devices", "Exit"):
-        assert expected in names
-    assert find(icon.menu, "Refresh now").default
+    # a short menu: the device lines, then only these
+    assert labels(icon.menu) == ["PRO Wireless: 76%", "Rename…", "Refresh now", "Display",
+                                 "Hide this device", "Diagnostics…", f"Exit (v{__version__})"]
+    left_click = next(i for i in icon.menu.items if isinstance(i, FakeItem) and i.default)
+    assert not left_click.visible                     # left-click opens settings, out of sight
+    left_click.action()
+    assert settings == [1]
+    find(icon.menu, "Rename…").action()
+    assert renamed == ["logi-1"]
     find(icon.menu, "Refresh now").action()
     assert app.refresh_event.is_set()
     find(icon.menu, "Hide this device").action()
@@ -117,10 +125,10 @@ def test_headset_menu_default_toggles_mic(fake_pystray, tmp_path):
 def test_settings_radio_items(fake_pystray, tmp_path):
     app, backend = make_app(tmp_path)
     app.apply([Reading("logi-1", "PRO Wireless", MOUSE, 76)])
-    poll = find(backend.icons["logi-1"].menu, "Poll every").action
-    two_min = find(poll, "2 minutes")
-    two_min.action()
-    assert app.store["poll_seconds"] == 120 and two_min.checked(two_min)
+    display = find(backend.icons["logi-1"].menu, "Display").action
+    white = find(find(display, "Icon colour").action, "White")
+    white.action()
+    assert app.store["icon_colour"] == "white" and white.checked(white)
 
 
 def test_menus_refresh_only_on_change(fake_pystray, tmp_path):
@@ -166,7 +174,8 @@ def test_whole_app_starts_and_exits_from_the_menu(fake_pystray, monkeypatch):
     while not windows and time.time() < end:
         time.sleep(0.02)
     assert windows and windows[0].startswith("http://127.0.0.1:")
-    find(placeholder.menu, "Exit").action()
+    next(i for i in placeholder.menu.items
+         if isinstance(i, FakeItem) and i.text.startswith("Exit (v")).action()
     t.join(10)
     assert result.get("rc") == 0 and placeholder.stopped
     assert autostart == [True]            # switched on at the very first launch

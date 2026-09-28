@@ -247,3 +247,16 @@ def test_mouse_dpi_and_polling_rate_in_the_browser(browser, tmp_path):
         page.close()
     finally:
         ui.stop()
+
+
+def test_the_tray_rename_item_opens_the_rename_dialog(browser, demo):
+    app, ui, _, _ = demo
+    page = new_page(browser)
+    page.goto(ui.url + "#/devices/rename/logi-1")
+    field = page.get_by_label("Device name")
+    sync_api.expect(field).to_have_value("PRO Wireless")
+    field.fill("Desk mouse")
+    page.get_by_role("button", name="Save").click()
+    sync_api.expect(page.get_by_role("heading", name="Desk mouse")).to_be_visible()
+    assert app.store["names"]["logi-1"] == "Desk mouse"
+    page.close()

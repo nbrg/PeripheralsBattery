@@ -10,7 +10,7 @@ import threading
 import webbrowser
 from typing import Dict
 
-from . import DISPLAY_NAME, __version__, trayicon, winshell
+from . import __version__, trayicon, winshell
 from .app import KIND_CHOICES, PLACEHOLDER, App
 from .config import app_dir
 from .model import HEADSET
@@ -155,59 +155,34 @@ class PystrayBackend:
                 version, url = app.update_available
                 out.append(Item(f"Download version {version}…", lambda: webbrowser.open(url)))
             out.append(Menu.SEPARATOR)
-            # Left-click runs the default item: mic toggle on headsets, else the settings window.
+            # Left-click runs the default item - the mic toggle on a headset, else the
+            # settings window. Kept out of sight: the menu itself stays short.
             reading = app.readings.get(key)
             mic = reading is not None and reading.kind == HEADSET and app.mic_toggle is not None
             if mic:
-                out.append(Item("Toggle mic mute", lambda: app.mic_toggle(), default=True))
-            if app.open_settings:
-                out.append(Item("Settings…", lambda: app.open_settings(), default=not mic))
-            if app.open_learn:
-                out.append(Item("Learn a new device…", lambda: app.open_learn()))
-            out.append(Item("Refresh now", refresh,
-                            default=not mic and app.open_settings is None))
-            out += [
-                Item("Poll every", Menu(*(radio("poll_seconds", v, lbl) for v, lbl in
-                                          ((30, "30 seconds"), (60, "1 minute"),
-                                           (120, "2 minutes"), (300, "5 minutes"))))),
-                Item("Low battery alert", Menu(*(radio("alert_at", v, lbl) for v, lbl in
-                                                 ((0, "Off"), (10, "10%"), (15, "15%"),
-                                                  (20, "20%"), (25, "25%"))))),
-                Item("Display", Menu(
-                    toggle("show_number", "Show percentage instead of picture"),
-                    toggle("flash_on_mute", "Blink headset while mic is muted"),
-                    toggle("windows_mute", "Count Windows mic mute as muted"),
-                    toggle("notify_full", "Notify when fully charged"),
-                    Item("Icon colour", Menu(*(radio("icon_colour", v, lbl) for v, lbl in
-                                               (("auto", "Follow the taskbar"), ("white", "White"),
-                                                ("black", "Black"))))),
-                    Item("Remove switched-off devices", Menu(*(radio("hide_off_after", v, lbl) for v, lbl in
-                                                               ((0, "Never"), (5, "After 5 minutes"),
-                                                                (30, "After 30 minutes"),
-                                                                (120, "After 2 hours"))))))),
-                Item("Sources", Menu(
-                    toggle("bluetooth", "Windows Bluetooth devices"),
-                    toggle("xinput", "Xbox-compatible controllers"))),
-                Menu.SEPARATOR,
-            ]
+                out.append(Item("Toggle mic mute", lambda: app.mic_toggle(), default=True, visible=False))
+            elif app.open_settings:
+                out.append(Item("Settings", lambda: app.open_settings(), default=True, visible=False))
+            if key != PLACEHOLDER and app.open_rename:
+                out.append(Item("Rename…", lambda: app.open_rename(key)))
+            out.append(Item("Refresh now", refresh, default=not mic and app.open_settings is None))
+            out.append(Item("Display", Menu(
+                toggle("show_number", "Show percentage instead of picture"),
+                toggle("flash_on_mute", "Blink headset while mic is muted"),
+                toggle("windows_mute", "Count Windows mic mute as muted"),
+                toggle("notify_full", "Notify when fully charged"),
+                Item("Icon colour", Menu(*(radio("icon_colour", v, lbl) for v, lbl in
+                                           (("auto", "Follow the taskbar"), ("white", "White"),
+                                            ("black", "Black"))))),
+                Item("Remove switched-off devices", Menu(*(radio("hide_off_after", v, lbl) for v, lbl in
+                                                           ((0, "Never"), (5, "After 5 minutes"),
+                                                            (30, "After 30 minutes"),
+                                                            (120, "After 2 hours"))))))))
             if key != PLACEHOLDER:
-                out.append(Item("Picture", Menu(*(pick_kind(k) for k, _ in KIND_CHOICES))))
                 out.append(Item("Hide this device", lambda: app.hide(key)))
-            if s["hidden"]:
-                out.append(Item("Show hidden devices", lambda: app.unhide_all()))
             if app.open_diagnostics:
                 out.append(Item("Diagnostics…", lambda: app.open_diagnostics()))
-            out += [
-                Item("Forget disconnected devices", lambda: app.forget_offline()),
-                Item("Open data folder", lambda: _open_folder()),
-            ]
-            if sys.platform == "win32":
-                out.append(Item("Start with Windows", lambda: self._toggle_autostart(),
-                                checked=lambda _i: winshell.autostart_enabled()))
-            out.append(Item("Check for updates", toggle_updates, checked=lambda _i: bool(s["update_check"])))
-            out += [Menu.SEPARATOR,
-                    Item(f"{DISPLAY_NAME} {__version__}", None, enabled=False),
-                    Item("Exit", lambda: app.stop())]
+            out += [Menu.SEPARATOR, Item(f"Exit (v{__version__})", lambda: app.stop())]
             return out
 
         return Menu(items)

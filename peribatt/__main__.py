@@ -213,6 +213,8 @@ def show_diagnostics(app) -> None:
 
 def wire_windows(app) -> None:
     """Settings window and learn wizard: a local web UI, started on demand."""
+    from urllib.parse import quote
+
     from . import winshell
     from .sources import reload_recipes, supported_check
     from .web import WebUi
@@ -226,6 +228,7 @@ def wire_windows(app) -> None:
     app.ui = ui
     app.open_settings = lambda: ui.open()
     app.open_learn = lambda: ui.open("learn")
+    app.open_rename = lambda key: ui.open(f"devices/rename/{quote(key, safe='')}")
 
 
 def cmd_learn() -> int:

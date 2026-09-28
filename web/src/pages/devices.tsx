@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Badge,
   Body1,
@@ -101,16 +101,27 @@ const useStyles = makeStyles({
   footer: { display: "flex", justifyContent: "flex-end", marginTop: "-6px" },
 })
 
-export function DevicesPage({ state, refresh, go }: {
+export function DevicesPage({ state, refresh, go, renameKey, onRenameOpened }: {
   state: State | null
   refresh: () => void
   go: (page: string) => void
+  /** Open the rename dialog for this device (from the tray's Rename… item). */
+  renameKey?: string | null
+  onRenameOpened?: () => void
 }) {
   const s = useStyles()
   const notify = useNotify()
   const [renaming, setRenaming] = useState<Device | null>(null)
   const [forgetting, setForgetting] = useState<Device | null>(null)
   const [configuring, setConfiguring] = useState<Device | null>(null)
+
+  useEffect(() => {
+    const device = renameKey ? state?.devices.find((d) => d.key === renameKey) : undefined
+    if (device) {
+      setRenaming(device)
+      onRenameOpened?.()
+    }
+  }, [renameKey, state, onRenameOpened])
 
   async function picture(d: Device, kind: "" | Kind) {
     try {
