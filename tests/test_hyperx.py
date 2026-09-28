@@ -35,7 +35,9 @@ def test_decode_known_replies():
     assert decode(reply(0x08, b4=0)) == {"muted": False}
     assert decode(reply(CMD_STATUS, b4=1)) == {"online": True}
     assert decode(reply(CMD_STATUS, b4=4)) == {"online": True}
-    assert decode(reply(CMD_STATUS, b4=2)) == {"online": False}       # pairing
+    # other status values are not "off" on every dongle (the Flight S flickered)
+    assert decode(reply(CMD_STATUS, b4=2)) == {}
+    assert decode(reply(CMD_STATUS, b4=0)) == {}
 
 
 def test_decode_rejects_junk():
@@ -104,18 +106,21 @@ def test_muted_is_not_reported_while_off():
     src = HyperXSource(api=api, threaded=False)
     src.poll()
     src.feed(reply(0x08, b4=1))
-    src.feed(reply(CMD_STATUS, 0))
+    for _ in range(MISSED_POLLS_OFFLINE + 1):           # no battery answers: switched off
+        src.poll()
     assert not src.readings()[0].muted
 
 
-def test_unplugged_dongle():
-    api, h = dongle()
-    seen = []
-    src = HyperXSource(api=api, on_change=seen.append, threaded=False)
+def test_status_reports_do_not_flip_a_working_headset_off():
+    """The Cloud Flight S answers the 3-second status query with values other than
+    1/4 while it is on; that used to mark it off until the next battery reply."""
+    api, _ = dongle()
+    src = HyperXSource(api=api, threaded=False)
     src.poll()
-    src._lost()
-    assert h.closed and seen[-1].note == "dongle unplugged"
-    assert src.readings()[0].online is False
+    src.feed(reply(CMD_BATTERY, b7=64))
+    for value in (0, 2, 3):
+        src.feed(reply(CMD_STATUS, value))
+        assert src.readings()[0].online
 
 
 def test_nothing_reported_before_the_dongle_was_ever_seen():

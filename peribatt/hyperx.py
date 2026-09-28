@@ -10,7 +10,8 @@ Protocol (as documented by the HyperHeadset project, MIT):
 
 * reply   - input report ``0b 00 bb <cmd> <data...>``
 
-      cmd 0x01  link status  byte 4: 1 or 4 = headset connected, 2 = pairing
+      cmd 0x01  link status  byte 4: 1 or 4 = headset connected (other values
+                differ between dongles and are not read as "off")
                 (asking for 0x01 also makes the dongle report the mute state)
       cmd 0x02  battery      byte 7: percent
       cmd 0x03  charging     byte 4: 0 no, 1 charging, 2 full, other = error
@@ -89,7 +90,12 @@ def decode(report: Sequence[int]) -> Dict[str, object]:
         return {}
     cmd, value = r[3], r[4]
     if cmd == CMD_STATUS:
-        return {"online": value in (1, 4)}
+        # 1 or 4 means "connected" on every dongle. Other values do not mean "off"
+        # everywhere: the Cloud Flight S answers the 3-second status query with
+        # other values while it is on, which made the icon flip between on and
+        # off. So only "connected" is taken from it (as CubE135's Flight S monitor
+        # does); "off" comes from battery requests going unanswered.
+        return {"online": True} if value in (1, 4) else {}
     if cmd == CMD_BATTERY:
         return {"online": True, "level": r[7]} if r[7] <= 100 else {}
     if cmd == CMD_CHARGE:
