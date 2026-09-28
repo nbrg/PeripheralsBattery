@@ -230,3 +230,36 @@ def test_charging_without_a_known_level_shows_none():
     api, _ = receiver({1: mouse})
     [r] = LogitechSource(api=api, clock=FakeClock()).poll()
     assert r.charging and r.level is None
+
+
+def test_charge_estimate_rises_fast_then_slower_and_never_claims_full():
+    assert hidpp.charge_estimate(74, 0) == 74
+    assert hidpp.charge_estimate(40, 10, rate=1.0) == 50              # fast phase
+    assert hidpp.charge_estimate(74, 10, rate=0.8) == 81               # 6 min to the knee, then slower
+    assert hidpp.charge_estimate(74, 10_000) == 99                     # 100 only when the device says
+    assert hidpp.learned_rate(40, 60, 20) == 1.0
+    assert hidpp.learned_rate(40, 60, 5) is None                       # too short to learn from
+    # the learned rate reproduces the observed charge
+    rate = hidpp.learned_rate(50, 90, 60)
+    assert hidpp.charge_estimate(50, 60, rate) == 90
+
+
+def test_the_level_climbs_while_charging_and_the_rate_is_learned():
+    t = {"now": 1_000_000.0}
+    mouse = FakeLogiDevice(battery=(0x0F, 0x6A, 0x00))                 # ~74% on battery
+    api, _ = receiver({1: mouse})
+    known = {}
+    src = LogitechSource(api=api, known=known, clock=FakeClock(), now=lambda: t["now"])
+    [r] = src.poll()
+    start = r.level
+    mouse.battery = [0x10, 0x73, 0x80]                                 # plugged in
+    src.poll()
+    t["now"] += 10 * 60
+    [r] = src.poll()
+    assert start < r.level < 100 and r.charging and r.note == "approximate"
+    t["now"] += 20 * 60                                                 # 30 min of charging...
+    mouse.battery = [0x10, 0x40, 0x00]                                 # ...unplugged: a real 4160 mV
+    [r] = src.poll()
+    assert not r.charging and r.level >= 95
+    [info] = known.values()
+    assert "charge_start" not in info and info["charge_rate"] > hidpp.DEFAULT_CHARGE_RATE
