@@ -84,6 +84,16 @@ class HidApi:
             raise OSError("hidapi unavailable")
         dev = self._hid.device()
         dev.open_path(path)
+        # cython-hidapi's read(n, 0) means "no timeout": it calls the *blocking*
+        # hid_read, which waits forever on a device with nothing to say - the
+        # "drop stale replies" loops hung the whole poll on a quiet receiver.
+        # Non-blocking mode makes timeout 0 return at once; reads with a real
+        # timeout go through hid_read_timeout and still wait as asked.
+        try:
+            dev.set_nonblocking(True)
+        except Exception:
+            dev.close()
+            raise
         return dev
 
 

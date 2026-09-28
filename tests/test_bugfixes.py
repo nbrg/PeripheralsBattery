@@ -297,3 +297,58 @@ def test_reopening_the_window_keeps_the_server_alive(tmp_path):
     assert ui.running
     assert ui.stopped.wait(3)                            # and it still stops once idle
     ui.stop()
+
+
+# --- a quiet receiver hung the whole poll (v0.6.0) ------------------------------------
+
+def test_hid_devices_are_opened_non_blocking():
+    """cython-hidapi's read(n, 0) blocks forever unless the device is non-blocking."""
+    from peribatt.hidio import HidApi
+
+    class Dev:
+        nonblocking = False
+
+        def open_path(self, path):
+            pass
+
+        def set_nonblocking(self, on):
+            Dev.nonblocking = bool(on)
+
+        def close(self):
+            pass
+
+    class Hid:
+        device = Dev
+    api = HidApi()
+    api._hid = Hid
+    api.open(b"x")
+    assert Dev.nonblocking
+
+
+def test_a_hanging_source_does_not_stop_the_others(tmp_path):
+    release = threading.Event()
+
+    class Hangs:
+        name = "logitech"
+
+        def poll(self):
+            release.wait(5)
+            return []
+
+    class Fine:
+        name = "hyperx"
+
+        def poll(self):
+            return [Reading("hx", "HyperX Cloud Flight S", "headset", 60)]
+
+    app = App(Store(tmp_path / "settings.json"), FakeBackend(), sources=[Hangs(), Fine()])
+    app.source_timeout = 0.2
+    app.poll_once()
+    assert "hx" in app.readings and app.source_status["logitech"]["error"] == "not answering"
+    started = time.monotonic()
+    app.poll_once()                                     # still stuck: skipped, no second wait
+    assert time.monotonic() - started < 0.2
+    release.set()
+    time.sleep(0.1)
+    app.poll_once()
+    assert app.source_status["logitech"]["error"] == ""

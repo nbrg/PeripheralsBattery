@@ -25,6 +25,7 @@ RESUME_SETTLE = 3.0          # after waking: give USB and the radios a moment...
 RESUME_RECHECK = 15.0        # ...and look again once wireless devices have reconnected
 SLEEP_GAP = 30.0             # a wait that overran by this much means the PC was asleep
 SLOW_SOURCE = 5.0            # log a warning when one provider takes longer than this
+SOURCE_TIMEOUT = 20.0        # a provider still busy after this is left behind (see _poll_source)
 # After a device is plugged in or connects, Windows reports some batteries (Bluetooth
 # ones especially) a few seconds late: look again this long after the event.
 RECHECKS = (3.0, 8.0, 15.0)
@@ -107,6 +108,9 @@ class App:
         self.update_available: Optional[tuple] = None  # (version, url) of a newer release
         self.update_checker = None
         self._rechecks: List[float] = []               # extra polls after a device event
+        self.source_timeout = SOURCE_TIMEOUT
+        self._stuck: Dict[str, threading.Thread] = {}  # providers whose poll never returned
+        self._last_found: Dict[str, List[Reading]] = {}
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -465,13 +469,7 @@ class App:
         for s in self.sources:
             name = getattr(s, "name", type(s).__name__)
             started = time.monotonic()
-            error = ""
-            found: List[Reading] = []
-            try:
-                found = s.poll()
-            except Exception as e:           # one broken provider must not stop the rest
-                error = f"{type(e).__name__}: {e}"
-                log.exception("%s poll failed", name)
+            found, error = self._poll_source(s, name)
             took = time.monotonic() - started
             results.extend(found)
             prev = self.source_status.get(name)
@@ -485,6 +483,38 @@ class App:
         self.apply(results)
         self.store.save()
         return results
+
+    def _poll_source(self, source, name: str):
+        """One provider's poll, on a thread of its own with a time limit: a provider
+        that hangs (a device that never answers, a driver that blocks) must not stop
+        the others - which is exactly how one quiet receiver once hid every device.
+        While it is still stuck it is skipped, and its last results stand in."""
+        stuck = self._stuck.get(name)
+        if stuck is not None:
+            if stuck.is_alive():
+                return list(self._last_found.get(name, [])), "not answering"
+            log.info("%s answers again", name)
+            del self._stuck[name]
+        box: Dict[str, object] = {}
+
+        def run():
+            try:
+                box["found"] = source.poll()
+            except Exception as e:           # one broken provider must not stop the rest
+                box["error"] = f"{type(e).__name__}: {e}"
+                log.exception("%s poll failed", name)
+
+        t = threading.Thread(target=run, daemon=True, name=f"poll-{name}")
+        t.start()
+        t.join(self.source_timeout)
+        if t.is_alive():
+            log.error("%s did not finish within %.0f s: skipped until it does", name, self.source_timeout)
+            self._stuck[name] = t
+            return list(self._last_found.get(name, [])), "not answering"
+        found = list(box.get("found") or [])
+        if "error" not in box:
+            self._last_found[name] = found
+        return found, str(box.get("error", ""))
 
     def resumed(self) -> None:
         """The PC woke up. Safe to call from any thread (the Windows power
