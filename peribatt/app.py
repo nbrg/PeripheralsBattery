@@ -347,6 +347,38 @@ class App:
         self.backend.refresh_menus()
         return True
 
+    # -- device settings (DPI, polling rate...) ---------------------------------------
+    def _controller(self, key: str):
+        """The source that can change settings of this device, or None."""
+        for s in self.sources:
+            while hasattr(s, "source"):                # Switchable / Throttled wrappers
+                s = s.source
+            has = getattr(s, "has_controls", None)
+            if has is not None and has(key):
+                return s
+        return None
+
+    def has_controls(self, key: str) -> bool:
+        try:
+            return self._controller(key) is not None
+        except Exception:
+            log.exception("has_controls %s", key)
+            return False
+
+    def device_controls(self, key: str) -> list:
+        """The device's settings, read from it now. Raises controls.Unavailable."""
+        src = self._controller(key)
+        if src is None:
+            raise ValueError("this device has no settings the app can change")
+        return src.controls(key)
+
+    def set_device_control(self, key: str, control_id: str, value) -> list:
+        src = self._controller(key)
+        if src is None:
+            raise ValueError("this device has no settings the app can change")
+        log.info("device setting %s: %s = %r", key, control_id, value)
+        return src.set_control(key, control_id, value)
+
     def forget_offline(self) -> None:
         """Drop grey icons of devices that are gone for good."""
         for key, r in list(self.readings.items()):

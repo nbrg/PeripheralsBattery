@@ -242,3 +242,36 @@ def test_concurrent_requests(client):
     for t in threads:
         t.join()
     assert results == [200] * 12
+
+
+def test_device_settings_over_http(tmp_path):
+    from peribatt.hidpp import LogitechSource
+
+    from .fakes import FakeClock, FakeHidppChannel, FakeLogiDevice
+    mouse = FakeLogiDevice(settings=True)
+    api = FakeApi()
+    api.add(0x046D, 0xC539, b"long", FakeHidppChannel({1: mouse}), 0xFF00, 0x0002)
+    a = App(Store(tmp_path / "settings.json"), FakeBackend(),
+            sources=[LogitechSource(api=api, clock=FakeClock())])
+    a.poll_once()
+    ui = web.WebUi(a, api=FakeApi(), opener=lambda u: None)
+    c = Client(ui)
+    try:
+        code, state = c.json("GET", "/api/state")
+        [dev] = state["devices"]
+        assert dev["configurable"] is True
+        key = dev["key"]
+        code, body = c.json("GET", f"/api/controls?key={key}")
+        assert code == 200
+        assert {x["id"]: x["value"] for x in body["controls"]} == {"dpi": 800, "rate": 1, "onboard": True}
+        code, body = c.json("POST", "/api/control", {"key": key, "id": "dpi", "value": 2400})
+        assert code == 200 and mouse.dpi == 2400
+        code, body = c.json("POST", "/api/control", {"key": key, "id": "dpi", "value": 99999})
+        assert code == 400 and "between" in body["error"]
+        mouse.online = False
+        code, body = c.json("GET", f"/api/controls?key={key}")
+        assert code == 409 and "switched off" in body["error"]
+        code, body = c.json("GET", "/api/controls?key=nope")
+        assert code == 400
+    finally:
+        ui.stop()

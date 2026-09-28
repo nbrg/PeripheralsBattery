@@ -18,9 +18,11 @@ nothing after the first poll.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from .controls import CHOICE, RANGE, Control, Unavailable, find
 from .hidio import HidApi
 from .model import DEVICE, HEADSET, KEYBOARD, MOUSE, Reading
 
@@ -31,6 +33,14 @@ REPORT_LEN = 90
 TRANSACTION_IDS = (0x1F, 0x3F, 0xFF, 0x9F, 0x08)
 CLASS_POWER, CMD_BATTERY, CMD_CHARGING = 0x07, 0x80, 0x84
 ST_OK, ST_BUSY, ST_FAIL, ST_NO_RESPONSE, ST_UNSUPPORTED = 0x02, 0x01, 0x03, 0x04, 0x05
+
+# Mouse settings (OpenRazer's razer_chroma_misc_* commands). "Get" is the "set" id | 0x80.
+CLASS_MISC, CLASS_DPI = 0x00, 0x04
+CMD_SET_RATE, CMD_GET_RATE = 0x05, 0x85
+CMD_SET_DPI, CMD_GET_DPI = 0x05, 0x85
+VARSTORE = 0x01
+RATES = {0x01: 1000, 0x02: 500, 0x08: 125}         # byte -> Hz
+DPI_MIN, DPI_MAX, DPI_STEP = 100, 30000, 50         # the mouse caps a value above its own maximum
 
 
 def build_report(tid: int, cmd_class: int, cmd_id: int, data_size: int = 0x02,
@@ -59,6 +69,17 @@ def parse_report(data: Sequence[int], cmd_class: int, cmd_id: int
     return d[0], d[9]
 
 
+def parse_args(data: Sequence[int], cmd_class: int, cmd_id: int, size: int
+               ) -> Tuple[Optional[int], Optional[List[int]]]:
+    """(status, the reply's arguments) - like :func:`parse_report`, but all of them."""
+    d = list(data)
+    if len(d) == REPORT_LEN + 1:
+        d = d[1:]
+    if len(d) < REPORT_LEN or d[6] != cmd_class or d[7] != cmd_id:
+        return (d[0] if d else None), None
+    return d[0], d[8:8 + size]
+
+
 def raw_to_percent(raw: int) -> int:
     return round(raw * 100 / 255)
 
@@ -85,6 +106,8 @@ class RazerSource:
         self.unsupported: set = set()
         self.last: Dict[int, Reading] = {}
         self.log: List[str] = []
+        self.paths: Dict[int, List[bytes]] = {}          # pid -> its collections, by index
+        self._io = threading.RLock()                     # polling and device settings
 
     def _exchange(self, dev, tid: int, cmd_id: int) -> Tuple[Optional[int], Optional[int]]:
         dev.send_feature_report(b"\x00" + build_report(tid, CLASS_POWER, cmd_id))
@@ -109,6 +132,10 @@ class RazerSource:
             dev.close()
 
     def poll(self) -> List[Reading]:
+        with self._io:
+            return self._poll()
+
+    def _poll(self) -> List[Reading]:
         self.log = []
         by_pid: Dict[int, List[dict]] = {}
         for d in self.api.enumerate(RAZER_VID):
@@ -118,6 +145,7 @@ class RazerSource:
             if pid in self.unsupported:
                 continue
             infos.sort(key=lambda d: (d.get("interface_number", 0), d.get("usage_page", 0)))
+            self.paths[pid] = [d["path"] for d in infos]
             name = (infos[0].get("product_string") or f"Razer device {pid:04x}").strip()
             reading = self._read(pid, name, infos)
             if reading:
@@ -158,6 +186,84 @@ class RazerSource:
         if pid not in self.working:
             self.unsupported.add(pid)
         return None
+
+    # -- mouse settings --------------------------------------------------------------
+    def _pid(self, key: str) -> Optional[int]:
+        return next((pid for pid in self.last if f"razer-{pid:04x}" == key), None)
+
+    def has_controls(self, key: str) -> bool:
+        pid = self._pid(key)
+        return pid is not None and self.last[pid].kind == MOUSE and pid in self.working
+
+    def _command(self, dev, tid: int, cmd_class: int, cmd_id: int, size: int,
+                 args: Sequence[int] = ()) -> Optional[List[int]]:
+        dev.send_feature_report(b"\x00" + build_report(tid, cmd_class, cmd_id, size, args))
+        for _ in range(3):
+            self.sleep(0.05)
+            reply = dev.get_feature_report(0x00, REPORT_LEN + 1)
+            status, out = parse_args(reply, cmd_class, cmd_id, size)
+            if status == ST_OK:
+                return out
+            if status != ST_BUSY:
+                return None
+        return None
+
+    def _on_mouse(self, key: str, action):
+        with self._io:
+            pid = self._pid(key)
+            if pid is None or pid not in self.working:
+                raise Unavailable("Switch the mouse on first: it has not answered since the app started.")
+            i, tid = self.working[pid]
+            paths = self.paths.get(pid, [])
+            if i >= len(paths):
+                raise Unavailable("Its receiver or cable is not plugged in.")
+            try:
+                dev = self.api.open(paths[i])
+            except OSError as e:
+                raise Unavailable(f"Could not open the mouse: {e}") from None
+            try:
+                return action(dev, tid)
+            except OSError as e:
+                raise Unavailable(f"Lost the connection to the mouse: {e}") from None
+            finally:
+                dev.close()
+
+    def _read_controls(self, dev, tid: int) -> List[Control]:
+        out: List[Control] = []
+        dpi = self._command(dev, tid, CLASS_DPI, CMD_GET_DPI, 0x07, (VARSTORE,))
+        if dpi is not None:
+            out.append(Control("dpi", "Sensitivity", RANGE, (dpi[1] << 8) | dpi[2], DPI_MIN, DPI_MAX,
+                               DPI_STEP, unit="DPI",
+                               help="How far the pointer moves per inch. "
+                                    "The mouse caps it at its own maximum."))
+        rate = self._command(dev, tid, CLASS_MISC, CMD_GET_RATE, 0x01)
+        if rate is not None:
+            out.append(Control("rate", "Polling rate", CHOICE, RATES.get(rate[0]),
+                               options=[(hz, f"{hz} Hz") for hz in sorted(RATES.values(), reverse=True)],
+                               help="How often the mouse reports its position. Faster uses more battery."))
+        if not out:
+            raise Unavailable("The mouse did not answer. Move it to wake it up, then try again.")
+        return out
+
+    def controls(self, key: str) -> List[Control]:
+        return self._on_mouse(key, self._read_controls)
+
+    def set_control(self, key: str, control_id: str, value) -> List[Control]:
+        def write(dev, tid):
+            control = find(self._read_controls(dev, tid), control_id)
+            if control is None:
+                raise ValueError("this mouse has no such setting")
+            value_ = control.check(value)
+            if control_id == "dpi":
+                hi, lo = value_ >> 8, value_ & 0xFF
+                ok = self._command(dev, tid, CLASS_DPI, CMD_SET_DPI, 0x07, (VARSTORE, hi, lo, hi, lo, 0, 0))
+            else:
+                byte = next(b for b, hz in RATES.items() if hz == value_)
+                ok = self._command(dev, tid, CLASS_MISC, CMD_SET_RATE, 0x01, (byte,))
+            if ok is None:
+                raise Unavailable(f"The mouse did not take the new {control.label.lower()}.")
+            return self._read_controls(dev, tid)
+        return self._on_mouse(key, write)
 
     def forget(self, key: str) -> None:
         for pid in list(self.last):

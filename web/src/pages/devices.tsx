@@ -37,10 +37,12 @@ import {
   MoreHorizontalRegular,
   PlugDisconnectedRegular,
   PowerRegular,
+  SettingsRegular,
   SparkleRegular,
 } from "@fluentui/react-icons"
 
 import { BatteryBar, PageHeader } from "@/components/common"
+import { DeviceSettingsDialog } from "@/components/device-settings"
 import { useNotify } from "@/components/notify"
 import { api, withToken, type Device, type State } from "@/lib/api"
 
@@ -88,6 +90,7 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusXLarge,
   },
   emptyIcon: { fontSize: "40px", color: tokens.colorNeutralForeground3 },
+  footer: { display: "flex", justifyContent: "flex-end", marginTop: "-6px" },
 })
 
 export function DevicesPage({ state, refresh, go }: {
@@ -99,6 +102,7 @@ export function DevicesPage({ state, refresh, go }: {
   const notify = useNotify()
   const [renaming, setRenaming] = useState<Device | null>(null)
   const [forgetting, setForgetting] = useState<Device | null>(null)
+  const [configuring, setConfiguring] = useState<Device | null>(null)
 
   async function act(d: Device, action: "hide" | "show" | "forget", done: string) {
     try {
@@ -139,6 +143,7 @@ export function DevicesPage({ state, refresh, go }: {
           {devices.map((d) => (
             <DeviceCard key={d.key} d={d} low={state.settings.low} warn={state.settings.warn}
                         onRename={() => setRenaming(d)}
+                        onConfigure={() => setConfiguring(d)}
                         onToggle={() => act(d, d.hidden ? "show" : "hide",
                                             d.hidden ? `${d.name} is back in the tray` : `${d.name} hidden from the tray`)}
                         onForget={() => setForgetting(d)} />
@@ -147,6 +152,7 @@ export function DevicesPage({ state, refresh, go }: {
       )}
 
       <RenameDialog device={renaming} onClose={() => setRenaming(null)} onDone={refresh} />
+      <DeviceSettingsDialog device={configuring} onClose={() => setConfiguring(null)} />
 
       <Dialog open={forgetting !== null} onOpenChange={(_, data) => !data.open && setForgetting(null)}>
         <DialogSurface>
@@ -170,11 +176,12 @@ export function DevicesPage({ state, refresh, go }: {
   )
 }
 
-function DeviceCard({ d, low, warn, onRename, onToggle, onForget }: {
+function DeviceCard({ d, low, warn, onRename, onConfigure, onToggle, onForget }: {
   d: Device
   low: number
   warn: number
   onRename: () => void
+  onConfigure: () => void
   onToggle: () => void
   onForget: () => void
 }) {
@@ -207,6 +214,9 @@ function DeviceCard({ d, low, warn, onRename, onToggle, onForget }: {
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {d.configurable && (
+                <MenuItem icon={<SettingsRegular />} onClick={onConfigure}>Device settings</MenuItem>
+              )}
               <MenuItem icon={<EditRegular />} onClick={onRename}>Rename</MenuItem>
               <MenuItem icon={d.hidden ? <EyeRegular /> : <EyeOffRegular />} onClick={onToggle}>
                 {d.hidden ? "Show in tray" : "Hide from tray"}
@@ -228,6 +238,14 @@ function DeviceCard({ d, low, warn, onRename, onToggle, onForget }: {
         </div>
         <BatteryBar level={d.level} charging={d.charging} online={d.online} low={low} warn={warn} />
       </div>
+      {d.configurable && (
+        <div className={s.footer}>
+          <Button appearance="subtle" size="small" icon={<SettingsRegular />} onClick={onConfigure}
+                  disabled={!d.online} title={d.online ? undefined : "Switch the device on to change its settings"}>
+            {d.kind === "mouse" ? "DPI & polling rate" : "Device settings"}
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

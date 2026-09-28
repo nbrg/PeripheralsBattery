@@ -14,6 +14,8 @@ Protocol (as documented by the HyperHeadset project, MIT):
       cmd 0x02  battery      byte 7: percent
       cmd 0x03  charging     byte 4: 0 no, 1 charging, 2 full, other = error
       cmd 0x08  mic mute     byte 4: 1 = muted
+      cmd 0x1A  auto power-off (get) byte 4: minutes;  cmd 0x18 sets it
+      cmd 0x19  sidetone (set, payload 0/1), answered with byte 4 = the new state
 
 Which collection takes the requests differs between dongles and operating
 systems - usually the vendor page 0xFF13, but on Windows some dongles only take
@@ -32,6 +34,7 @@ import threading
 from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence
 
+from .controls import CHOICE, TOGGLE, Control, Unavailable, find
 from .hidio import HidApi, hexdump
 from .model import HEADSET, Reading
 
@@ -48,6 +51,9 @@ VENDOR_PAGE = 0xFF13
 PACKET_LEN = 62
 
 CMD_STATUS, CMD_BATTERY, CMD_CHARGE, CMD_MUTE = 0x01, 0x02, 0x03, 0x08
+CMD_SET_AUTO_OFF, CMD_SIDETONE, CMD_GET_AUTO_OFF = 0x18, 0x19, 0x1A
+AUTO_OFF_CHOICES = (10, 20, 30)          # minutes, as NGENUITY offers them
+ANSWER_WAIT = 1.5                        # seconds to wait for the headset to answer a setting
 REPLY_ID, MAGIC = 0x0B, 0xBB
 
 _BASE = bytes([0x06, 0x00, 0x02, 0x00, 0x9A, 0x00, 0x00, 0x68,
@@ -85,6 +91,10 @@ def decode(report: Sequence[int]) -> Dict[str, object]:
         return {"charging": value in (1, 2)}
     if cmd == CMD_MUTE:
         return {"muted": value == 1}
+    if cmd == CMD_GET_AUTO_OFF:
+        return {"auto_off": value}
+    if cmd == CMD_SIDETONE:
+        return {"sidetone": value == 1}
     return {}
 
 
@@ -97,6 +107,8 @@ class HeadsetState:
         self.charging = False
         self.muted = False
         self.missed = 0               # polls without any battery answer
+        self.auto_off: Optional[int] = None     # minutes; None until the headset said
+        self.sidetone: Optional[bool] = None    # write-only: known once set from here
 
     @property
     def name(self) -> str:
@@ -117,6 +129,10 @@ class HeadsetState:
             self.charging = bool(changes["charging"])
         if "muted" in changes:
             self.muted = bool(changes["muted"])
+        if "auto_off" in changes:
+            self.auto_off = int(changes["auto_off"])
+        if "sidetone" in changes:
+            self.sidetone = bool(changes["sidetone"])
         return self.reading() != before
 
     def reading(self) -> Reading:
@@ -142,6 +158,7 @@ class HyperXSource:
         self.state = HeadsetState()
         self.seen = False               # the dongle has been found at least once
         self._lock = threading.RLock()
+        self._answered = threading.Condition(self._lock)   # a settings reply came in
         self._handles: List[object] = []
         self._writers: List[object] = []   # collections requests go to (narrowed on a reply)
         self._stop = threading.Event()
@@ -219,6 +236,8 @@ class HyperXSource:
             was_online = self.state.online
             changed = self.state.apply(changes)
             snap = self.state.reading()
+            if "auto_off" in changes or "sidetone" in changes:
+                self._answered.notify_all()
         if changes.get("online") and not was_online and "level" not in changes:
             self._send(CMD_BATTERY, CMD_CHARGE)      # just switched on: ask for its level
         if changed and self.on_change:
@@ -276,6 +295,63 @@ class HyperXSource:
         # Only while the headset is on: a switched-off headset has no mute state.
         if self._writers and self.state.online:
             self._send(CMD_STATUS)
+
+    # -- headset settings ------------------------------------------------------------
+    def has_controls(self, key: str) -> bool:
+        return self.seen and key == self.state.key
+
+    def _ask(self, cmd: int, payload: int, done) -> bool:
+        """Sends one request and waits until ``done()`` holds (the reply was read)."""
+        with self._lock:
+            if not self._writers or not self.state.online:
+                raise Unavailable("Switch the headset on first.")
+        self._send_packet(packet(cmd, payload))
+        with self._lock:
+            return self._answered.wait_for(done, ANSWER_WAIT)
+
+    def _send_packet(self, data: bytes) -> None:
+        for writer in list(self._writers):
+            try:
+                self._write(writer, data)
+            except (OSError, ValueError) as e:
+                self.log.append(f"write: {e}")
+
+    def _controls(self) -> List[Control]:
+        st = self.state
+        options = [(m, f"After {m} minutes") for m in AUTO_OFF_CHOICES]
+        if st.auto_off is not None and st.auto_off not in AUTO_OFF_CHOICES:
+            options.insert(0, (st.auto_off, "Never" if st.auto_off == 0 else f"After {st.auto_off} minutes"))
+        return [
+            Control("auto_off", "Turn off when idle", CHOICE, st.auto_off, options=options,
+                    help="Switches the headset off after this long without sound, to save battery."),
+            Control("sidetone", "Sidetone", TOGGLE, st.sidetone,
+                    help="Hear your own voice in the headset while you talk. The headset does not "
+                         "report this setting, so it shows once it has been set here."),
+        ]
+
+    def controls(self, key: str) -> List[Control]:
+        if not self._ask(CMD_GET_AUTO_OFF, 0, lambda: self.state.auto_off is not None):
+            raise Unavailable("The headset did not answer. Check that it is on, then try again.")
+        return self._controls()
+
+    def set_control(self, key: str, control_id: str, value) -> List[Control]:
+        control = find(self._controls(), control_id)
+        if control is None:
+            raise ValueError("this headset has no such setting")
+        value = control.check(value)
+        if control_id == "auto_off":
+            with self._lock:
+                self.state.auto_off = None
+            self._ask(CMD_SET_AUTO_OFF, value, lambda: True)
+            ok = self._ask(CMD_GET_AUTO_OFF, 0, lambda: self.state.auto_off is not None)
+            if not ok or self.state.auto_off != value:
+                raise Unavailable("The headset did not take the new setting.")
+        else:
+            with self._lock:
+                self.state.sidetone = None
+            if not self._ask(CMD_SIDETONE, int(value), lambda: self.state.sidetone is not None):
+                raise Unavailable("The headset did not answer. Check that it is on, then try again.")
+        return self._controls()
 
     def readings(self) -> List[Reading]:
         with self._lock:

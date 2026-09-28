@@ -201,3 +201,42 @@ def test_the_page_keeps_the_server_alive(browser, demo):
     time.sleep(4)                       # the page polls every 2 s
     assert ui.running
     page.close()
+
+
+def test_mouse_dpi_and_polling_rate_in_the_browser(browser, tmp_path):
+    from peribatt.hidpp import LogitechSource
+
+    from .fakes import FakeClock, FakeHidppChannel, FakeLogiDevice
+    mouse = FakeLogiDevice(settings=True)
+    api = FakeApi()
+    api.add(0x046D, 0xC539, b"long", FakeHidppChannel({1: mouse}), 0xFF00, 0x0002)
+    app = App(Store(tmp_path / "settings.json"), FakeBackend(),
+              sources=[LogitechSource(api=api, clock=FakeClock())])
+    app.poll_once()
+    ui = web.WebUi(app, api=FakeApi(), opener=lambda u: None)
+    ui.start()
+    try:
+        page = new_page(browser)
+        page.goto(ui.url)
+        page.get_by_role("button", name="DPI & polling rate").click()
+        panel = page.get_by_test_id("device-settings")
+        sync_api.expect(panel).to_be_visible()
+        sync_api.expect(page.get_by_label("Sensitivity value")).to_have_value("800 DPI")
+        page.wait_for_timeout(400)                                           # dialog fade-in
+        shot(page, "device-settings")
+
+        page.get_by_role("button", name="1600", exact=True).click()           # a DPI preset
+        sync_api.expect(page.locator(".fui-ToastTitle", has_text="Sensitivity saved")).to_be_visible()
+        assert mouse.dpi == 1600
+
+        page.get_by_role("combobox", name="Polling rate").click()
+        page.get_by_role("option", name="500 Hz").click()
+        sync_api.expect(page.locator(".fui-ToastTitle", has_text="Polling rate saved")).to_be_visible()
+        assert mouse.rate == 2
+
+        page.get_by_role("switch", name="Onboard profiles").click()
+        sync_api.expect(page.locator(".fui-ToastTitle", has_text="Onboard profiles saved")).to_be_visible()
+        assert mouse.mode == 2
+        page.close()
+    finally:
+        ui.stop()

@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, learn, prefs, style
 from .config import app_dir
+from .controls import Unavailable
 from .hidio import HidApi
 from .model import DEVICE, Reading
 from .render import render
@@ -236,6 +237,7 @@ class WebUi:
                 "key": key, "name": eff.name, "original": r.name, "kind": r.kind,
                 "level": r.level, "charging": r.charging, "online": r.online, "muted": eff.muted,
                 "note": r.note, "hidden": key in app.store["hidden"],
+                "configurable": app.has_controls(key),
                 "estimate": app.estimator.estimate(eff),
                 "icon": f"/api/icon?key={key}&v={r.level}-{int(r.charging)}-{int(r.online)}",
             })
@@ -252,6 +254,16 @@ class WebUi:
         kw = {"set_autostart": self.set_autostart} if self.set_autostart else {}
         prefs.apply(self.app, clean, **kw)
         return {"ok": True, "settings": self.state()["settings"]}
+
+    def device_controls(self, key: str) -> dict:
+        return {"controls": [c.to_json() for c in self.app.device_controls(key)]}
+
+    def set_device_control(self, body: dict) -> dict:
+        key, control_id = str(body.get("key", "")), str(body.get("id", ""))
+        if "value" not in body:
+            raise ValueError("no value")
+        after = self.app.set_device_control(key, control_id, body["value"])
+        return {"ok": True, "controls": [c.to_json() for c in after]}
 
     def device_action(self, body: dict) -> dict:
         app, key, action = self.app, body.get("key", ""), body.get("action")
@@ -397,6 +409,15 @@ def _handler(ui: WebUi):
                     return self._json(200, ui.state())
                 if url.path == "/api/icon":
                     return self._send(200, ui.icon(q), "image/png")
+                if url.path == "/api/controls":
+                    if ui.app is None:
+                        return self._json(409, {"error": "the tray app is not running"})
+                    try:
+                        return self._json(200, ui.device_controls(q.get("key", [""])[0]))
+                    except Unavailable as e:
+                        return self._json(409, {"error": str(e)})
+                    except ValueError as e:
+                        return self._json(400, {"error": str(e)})
                 if url.path == "/api/learn/devices":
                     return self._json(200, ui.learn_call("devices", {"all": q.get("all", ["0"])[0] == "1"}))
                 if url.path.startswith("/api/"):
@@ -416,11 +437,16 @@ def _handler(ui: WebUi):
                 body = self._body()
                 if path == "/api/ping":
                     return self._json(200, {"ok": True})
-                if ui.app is None and path in ("/api/settings", "/api/device"):
+                if ui.app is None and path in ("/api/settings", "/api/device", "/api/control"):
                     return self._json(409, {"error": "the tray app is not running"})
                 if path == "/api/settings":
                     res = ui.save_settings(body)
                     return self._json(200 if res["ok"] else 400, res)
+                if path == "/api/control":
+                    try:
+                        return self._json(200, ui.set_device_control(body))
+                    except Unavailable as e:
+                        return self._json(409, {"error": str(e)})
                 if path == "/api/device":
                     res = ui.device_action(body)
                     return self._json(200 if res["ok"] else 400, res)

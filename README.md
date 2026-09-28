@@ -39,6 +39,11 @@ All thresholds can be changed in `settings.json`.
   cards, instant-save settings, colour thresholds with a live icon preview, light/dark
   following Windows. It opens as a chromeless Edge app window and costs
   nothing while closed.
+- **Device settings without the maker's software**: change a mouse's DPI (slider plus
+  400/800/1600/3200 presets) and polling rate, and turn onboard profiles on or off,
+  without G HUB or Synapse. Logitech HID++ mice (features 0x2201, 0x8060, 0x8100) and
+  Razer mice; HyperX headsets get auto power-off and sidetone. Every change is read
+  back from the device, so the window never claims a setting the mouse ignored.
 - **Learn a new device**: a wizard that listens to an unsupported USB dongle while
   you mute/unmute and plug/unplug it, finds the battery, mute and charging bytes,
   and saves them as a shareable recipe.
@@ -194,8 +199,10 @@ installer and attaches both to a GitHub release.
   [HyperHeadset](https://github.com/LennardKittner/HyperHeadset) (MIT) and
   [hyperx-cloud-flight-s-battery-monitor](https://github.com/CubE135/hyperx-cloud-flight-s-battery-monitor) (MIT).
 - Headset request/reply layouts used in the recipes: [HeadsetControl](https://github.com/Sapd/HeadsetControl).
-- Logitech HID++ and the Li-ion voltage curve: [Solaar](https://github.com/pwr-Solaar/Solaar).
-- Razer report format: [OpenRazer](https://github.com/openrazer/openrazer).
+- Logitech HID++ (battery, DPI, report rate, onboard profiles) and the Li-ion voltage
+  curve: [Solaar](https://github.com/pwr-Solaar/Solaar).
+- Razer report format and the DPI / polling rate commands: [OpenRazer](https://github.com/openrazer/openrazer).
+- HyperX auto power-off and sidetone commands: [HyperHeadset](https://github.com/LennardKittner/HyperHeadset).
 
 ## License
 

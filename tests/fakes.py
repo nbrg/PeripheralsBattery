@@ -73,7 +73,8 @@ class FakeClock:
 
 class FakeLogiDevice:
     def __init__(self, name="PRO Wireless", dev_type=3, unit=b"\x1a\x2b\x3c\x4d",
-                 battery_feature=0x1001, battery=(0x0F, 0xA0, 0x00), online=True):
+                 battery_feature=0x1001, battery=(0x0F, 0xA0, 0x00), online=True,
+                 settings=False, onboard_locks=False):
         self.name = name.encode()
         self.dev_type = dev_type
         self.unit = unit
@@ -82,6 +83,10 @@ class FakeLogiDevice:
         self.online = online
         # feature id -> index as a real device would assign them
         self.features = {0x0000: 0, 0x0003: 2, 0x0005: 3, battery_feature: 6}
+        if settings:                             # DPI, report rate, onboard profiles
+            self.features.update({0x2201: 8, 0x8060: 9, 0x8100: 10})
+        self.dpi, self.rate, self.mode = 800, 1, 1  # 800 DPI, 1 ms (1000 Hz), onboard mode
+        self.onboard_locks = onboard_locks       # ignores DPI/rate writes while in onboard mode
         self.calls = 0
 
 
@@ -121,6 +126,25 @@ class FakeHidppChannel(QueueHandle):
             out = [dev.dev_type]
         elif feature == 0x0003 and fn == 0:
             out = [1, *dev.unit]
+        elif feature == 0x2201 and fn == 1:              # 100..25600 step 50
+            out = [0, 0x00, 0x64, 0xE0, 0x32, 0x64, 0x00]
+        elif feature == 0x2201 and fn == 2:
+            out = [0, dev.dpi >> 8, dev.dpi & 0xFF, 0x03, 0x20]
+        elif feature == 0x2201 and fn == 3:
+            if not (dev.onboard_locks and dev.mode == 1):
+                dev.dpi = (params[1] << 8) | params[2]
+            out = [0]
+        elif feature == 0x8060 and fn == 0:
+            out = [0b10001011]                        # 1, 2, 4, 8 ms
+        elif feature == 0x8060 and fn == 1:
+            out = [dev.rate]
+        elif feature == 0x8060 and fn == 2:
+            if not (dev.onboard_locks and dev.mode == 1):
+                dev.rate = params[0]
+        elif feature == 0x8100 and fn == 2:
+            out = [dev.mode]
+        elif feature == 0x8100 and fn == 1:
+            dev.mode = params[0]
         elif feature == dev.battery_feature:
             out = dev.battery
         else:                                    # HID++ 2.0 error: invalid function
@@ -140,6 +164,8 @@ class FakeRazer:
         self.charging = charging
         self.asleep = asleep
         self.supported = supported
+        self.mouse = True
+        self.dpi, self.rate = 1600, 0x01
         self.reply = bytes(91)
         self.sent: List[bytes] = []
         self.closed = False
@@ -154,6 +180,16 @@ class FakeRazer:
             msg[0] = 0x03
         elif self.asleep:
             msg[0] = 0x04
+        elif req[6] == 0x04:                       # DPI (mice only)
+            msg[0] = 0x02 if self.mouse else 0x05
+            if req[7] == 0x05:
+                self.dpi = (req[9] << 8) | req[10]
+            msg[8:13] = bytes([1, self.dpi >> 8, self.dpi & 0xFF, self.dpi >> 8, self.dpi & 0xFF])
+        elif req[6] == 0x00:                       # polling rate
+            msg[0] = 0x02 if self.mouse else 0x05
+            if req[7] == 0x05:
+                self.rate = req[8]
+            msg[8] = self.rate
         else:
             msg[0] = 0x02
             msg[9] = self.raw if req[7] == 0x80 else self.charging

@@ -19,6 +19,23 @@ export interface Device {
   hidden: boolean
   estimate: string | null
   icon: string
+  /** The app can change settings of this device (DPI, polling rate...). */
+  configurable: boolean
+}
+
+/** One device setting, as the device reported it. */
+export interface Control {
+  id: string
+  label: string
+  type: "range" | "choice" | "toggle"
+  /** null: the device does not report it (e.g. a write-only setting). */
+  value: number | boolean | null
+  unit: string
+  help: string
+  min?: number
+  max?: number
+  step?: number
+  options?: [number, string][]
 }
 
 export interface Settings {
@@ -68,6 +85,10 @@ export const api = {
     call<{ ok: boolean; settings: Settings }>("POST", "/api/settings", values),
   device: (key: string, action: "rename" | "hide" | "show" | "forget", name?: string) =>
     call<{ ok: boolean }>("POST", "/api/device", { key, action, name }),
+  controls: (key: string) =>
+    call<{ controls: Control[] }>("GET", `/api/controls?key=${encodeURIComponent(key)}`),
+  setControl: (key: string, id: string, value: number | boolean) =>
+    call<{ ok: boolean; controls: Control[] }>("POST", "/api/control", { key, id, value }),
   learn: {
     devices: (all: boolean) => call<LearnDevice[]>("GET", `/api/learn/devices?all=${all ? 1 : 0}`),
     open: (id: number) => call<{ ok: boolean; collections: number }>("POST", "/api/learn/open", { id }),

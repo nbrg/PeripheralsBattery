@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from . import logi_controls
+from .controls import Control, Unavailable
 from .hidio import HidApi, hexdump
 from .model import DEVICE, KEYBOARD, MOUSE, Reading
 
@@ -275,6 +278,9 @@ class LogitechSource:
         self.known: Dict[str, dict] = known if known is not None else {}
         self.silent: Dict[str, float] = {}       # slot id -> skip until (monotonic time)
         self.log: List[str] = []
+        self.where: Dict[str, Tuple[int, str, int]] = {}   # key -> (pid, instance, slot), seen online
+        self.caps: Dict[str, Dict[str, Optional[int]]] = {}  # key -> settings feature indexes
+        self._io = threading.RLock()             # polling and device settings share the receiver
 
     @staticmethod
     def slot_id(pid: int, index: int, instance: str = "") -> str:
@@ -333,10 +339,15 @@ class LogitechSource:
                 self.silent[sid] = self.clock() + SILENT_BACKOFF
             return None
         level, charging = decode_battery(prof.feature, p)
+        self.where[prof.key] = (pid, inst, index)
         self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
         return Reading(prof.key, prof.name, prof.kind, level, charging, online=True)
 
     def poll(self) -> List[Reading]:
+        with self._io:
+            return self._poll()
+
+    def _poll(self) -> List[Reading]:
         self.log = []
         out: List[Reading] = []
         groups = self._collections()
@@ -371,8 +382,53 @@ class LogitechSource:
                                    None, False, online=False, note=note))
         return out
 
+    # -- device settings (DPI, polling rate...) ------------------------------------
+    def has_controls(self, key: str) -> bool:
+        caps = self.caps.get(key)
+        return key in self.where and (caps is None or any(caps.values()))
+
+    def _on_device(self, key: str, action):
+        """Opens the device's receiver, wakes the device and runs ``action(ch, slot, caps)``."""
+        with self._io:
+            where = self.where.get(key)
+            if where is None:
+                raise Unavailable("Switch the device on first: it has not answered since the app started.")
+            pid, inst, index = where
+            paths = self._collections().get((pid, inst))
+            if not paths:
+                raise Unavailable("Its receiver or cable is not plugged in.")
+            try:
+                ch = self._open(paths)
+            except OSError as e:
+                raise Unavailable(f"Could not open its receiver: {e}") from None
+            try:
+                ch.ping(index)
+                caps = self.caps.get(key)
+                if caps is None:
+                    caps = self.caps[key] = logi_controls.capabilities(ch, index)
+                return action(ch, index, caps)
+            except HidppError as e:
+                if e.legacy:
+                    raise Unavailable("The device is switched off or out of range.") from None
+                raise Unavailable(f"The device refused the request ({e}).") from None
+            except TimeoutError:
+                raise Unavailable("The device did not answer. Move it or press a key to wake it up, "
+                                  "then try again.") from None
+            except OSError as e:
+                raise Unavailable(f"Lost the connection to the receiver: {e}") from None
+            finally:
+                ch.close()
+
+    def controls(self, key: str) -> List[Control]:
+        return self._on_device(key, logi_controls.read)
+
+    def set_control(self, key: str, control_id: str, value) -> List[Control]:
+        return self._on_device(key, lambda ch, i, caps: logi_controls.write(ch, i, caps, control_id, value))
+
     def forget(self, key: str) -> None:
         for sid, info in list(self.known.items()):
             if info.get("key") == key:
                 self.known.pop(sid, None)
                 self.profiles.pop(sid, None)
+        self.where.pop(key, None)
+        self.caps.pop(key, None)
