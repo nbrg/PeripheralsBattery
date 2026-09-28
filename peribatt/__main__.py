@@ -108,6 +108,7 @@ def cmd_probe() -> int:
 def run_tray() -> int:
     from . import winshell
     from .app import App
+    from .devwatch import DeviceWatcher
     from .micmute import MicMuteWatcher
     from .model import HEADSET
     from .power import PowerWatcher
@@ -147,6 +148,8 @@ def run_tray() -> int:
 
     power = PowerWatcher(on_resume)
     power.start()                        # no-op outside Windows; the poll loop also notices sleep
+    devices = DeviceWatcher(app.devices_changed)
+    devices.start()                      # plug/unplug: poll at once, and cache the HID device list
 
     wire_windows(app)
     app.open_diagnostics = lambda: threading.Thread(
@@ -165,6 +168,7 @@ def run_tray() -> int:
         pass
     finally:
         power.stop()
+        devices.stop()
         app.stop()
         if getattr(app, "ui", None) is not None:
             app.ui.stop()

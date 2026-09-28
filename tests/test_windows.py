@@ -120,3 +120,12 @@ def test_icons_are_built_in_memory_with_stable_ids(tmp_path):
     assert set(Path(tempfile.gettempdir()).glob("*.ico")) - before == set()
     for key in list(backend.icons):
         backend.remove(key)
+
+
+def test_device_notifications_register_and_unregister():
+    from peribatt import devwatch, hidio
+    w = devwatch.DeviceWatcher(lambda: None)
+    assert w.start()
+    assert hidio._watching
+    w.stop()
+    assert not hidio._watching

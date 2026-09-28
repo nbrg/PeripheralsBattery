@@ -9,7 +9,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Protocol, Sequence
 
-from . import style
+from . import hidio, style
 from .config import Store
 from .estimate import Estimator
 from .model import DEVICE, HEADSET, Reading, merge
@@ -423,6 +423,11 @@ class App:
         self._resumed_at = time.monotonic()
         self.refresh_event.set()
 
+    def devices_changed(self) -> None:
+        """A HID device was plugged in or removed: look now, not at the next poll."""
+        log.info("device plugged in or removed: re-checking")
+        self.refresh_event.set()
+
     def _after_resume(self) -> Optional[float]:
         """On the poll thread: let devices settle, drop handles that may have gone
         stale while asleep, and return when to look again."""
@@ -433,6 +438,7 @@ class App:
         if settle > 0 and self.stop_event.wait(settle):
             return None
         self._resumed_at = None
+        hidio.device_list_changed()           # devices may have come or gone while asleep
         for s in self.sources:
             reset = getattr(s, "reset", None)
             if reset:

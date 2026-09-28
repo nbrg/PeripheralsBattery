@@ -81,7 +81,10 @@ def report(app=None, api=None, sources=None, readings=None, is_supported=lambda 
              f"{platform.platform()}, Python {platform.python_version()} "
              f"({platform.architecture()[0]}), {how}",
              f"Data folder: {app_dir()}", ""]
-    lines += hid_section(api, is_supported) + [""]
+    from . import hidio
+    lines += hid_section(api, is_supported)
+    lines += [f"HID device list: read {hidio.stats['hidapi']} times, answered from cache "
+              f"{hidio.stats['cached']} times" + ("" if hidio._watching else " (no plug/unplug notices)"), ""]
     if app is not None:
         sources = app.sources
         readings = list(app.readings.values())
