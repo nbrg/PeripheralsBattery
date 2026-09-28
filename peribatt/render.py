@@ -1,6 +1,8 @@
-"""Draws the tray icon: a colour-coded frame around a pictogram of the device
-(mouse, headset, keyboard, gamepad). The pictogram doubles as the gauge - it is
-solid up to the battery level and faint above it, like a glass filling up.
+"""Draws the tray icon: a pictogram of the device (mouse, headset, keyboard,
+gamepad) inside a frame that doubles as the battery gauge. The frame fills
+clockwise from the top centre, like a progress ring, in its status colour
+(green charging, red / yellow low, white or charcoal otherwise); the empty rest
+of it is a faint track.
 
 Everything is drawn as vector shapes at 4x size and scaled down with a
 high-quality filter, so edges are smooth at every tray size (16-64 px).
@@ -8,15 +10,16 @@ Optionally the percentage can be shown instead of the pictogram.
 """
 from __future__ import annotations
 
+import math
 from functools import lru_cache
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Tuple
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from .model import HEADSET, KEYBOARD, MOUSE
 
 SS = 4                     # supersampling factor
-EMPTY_ALPHA = 80           # opacity of the "empty" part of the pictogram
+TRACK_ALPHA = 70           # opacity of the empty part of the gauge
 TEXT_RGB = (250, 250, 250)
 TEXT_RGB_LIGHT = (24, 24, 24)
 GAMEPAD = "gamepad"
@@ -24,50 +27,51 @@ BOLT_RGB = (255, 214, 10)
 
 # --- pictograms -------------------------------------------------------------
 # Each draws a white silhouette on an "L" mask of side s (already supersampled)
-# in unit coordinates: u(0.5) is the middle.
+# in unit coordinates: u(0.5) is the middle. They use nearly the whole square:
+# at 16 px every pixel counts.
 
 
 def _mouse(d: ImageDraw.ImageDraw, u: Callable[[float], float]) -> None:
-    d.rounded_rectangle((u(.30), u(.12), u(.70), u(.90)), radius=u(.20), fill=255)
-    gap = max(1, round(u(.05)))
-    d.line((u(.5), u(.12), u(.5), u(.42)), fill=0, width=gap)                   # button split
-    d.line((u(.30), u(.42), u(.70), u(.42)), fill=0, width=gap)
-    d.rounded_rectangle((u(.46), u(.2), u(.54), u(.34)), radius=u(.04), fill=255)  # wheel
+    d.rounded_rectangle((u(.22), u(.04), u(.78), u(.96)), radius=u(.28), fill=255)
+    gap = max(1, round(u(.06)))
+    d.line((u(.5), u(.04), u(.5), u(.42)), fill=0, width=gap)                   # button split
+    d.line((u(.22), u(.42), u(.78), u(.42)), fill=0, width=gap)
+    d.rounded_rectangle((u(.45), u(.14), u(.55), u(.32)), radius=u(.05), fill=255)  # wheel
 
 
 def _headset(d, u) -> None:
-    w = round(u(.09))
-    d.arc((u(.17), u(.1), u(.83), u(.8)), 180, 360, fill=255, width=w)          # headband
-    d.line((u(.17) + w / 2, u(.45), u(.17) + w / 2, u(.58)), fill=255, width=w)
-    d.line((u(.83) - w / 2, u(.45), u(.83) - w / 2, u(.58)), fill=255, width=w)
-    d.rounded_rectangle((u(.1), u(.5), u(.36), u(.9)), radius=u(.08), fill=255)   # ear cups
-    d.rounded_rectangle((u(.64), u(.5), u(.9), u(.9)), radius=u(.08), fill=255)
+    w = round(u(.12))
+    d.arc((u(.08), u(.02), u(.92), u(.86)), 180, 360, fill=255, width=w)         # headband
+    d.line((u(.08) + w / 2, u(.42), u(.08) + w / 2, u(.6)), fill=255, width=w)
+    d.line((u(.92) - w / 2, u(.42), u(.92) - w / 2, u(.6)), fill=255, width=w)
+    d.rounded_rectangle((u(.02), u(.48), u(.36), u(.98)), radius=u(.1), fill=255)  # ear cups
+    d.rounded_rectangle((u(.64), u(.48), u(.98), u(.98)), radius=u(.1), fill=255)
 
 
 def _keyboard(d, u) -> None:
-    d.rounded_rectangle((u(.04), u(.24), u(.96), u(.78)), radius=u(.08), fill=255)
-    key, step = u(.1), .135
-    for y, x0, n in ((.32, .12, 6), (.46, .18, 5)):
+    d.rounded_rectangle((u(0), u(.16), u(1), u(.86)), radius=u(.1), fill=255)
+    key, step = u(.13), .17
+    for y, x0, n in ((.27, .08, 5), (.45, .16, 4)):
         for i in range(n):
             x = u(x0 + i * step)
-            d.rounded_rectangle((x, u(y), x + key, u(y) + key), radius=u(.02), fill=0)
-    d.rounded_rectangle((u(.26), u(.6), u(.74), u(.69)), radius=u(.03), fill=0)   # space bar
+            d.rounded_rectangle((x, u(y), x + key, u(y) + key), radius=u(.03), fill=0)
+    d.rounded_rectangle((u(.24), u(.64), u(.76), u(.75)), radius=u(.04), fill=0)   # space bar
 
 
 def _gamepad(d, u) -> None:
-    d.ellipse((u(.04), u(.34), u(.44), u(.84)), fill=255)                        # grips
-    d.ellipse((u(.56), u(.34), u(.96), u(.84)), fill=255)
-    d.rounded_rectangle((u(.18), u(.26), u(.82), u(.64)), radius=u(.16), fill=255)
-    w = round(u(.07))
-    d.line((u(.16), u(.48), u(.36), u(.48)), fill=0, width=w)                    # d-pad
-    d.line((u(.26), u(.38), u(.26), u(.58)), fill=0, width=w)
-    for cx, cy in ((.68, .41), (.78, .52)):                                      # buttons
-        d.ellipse((u(cx - .05), u(cy - .05), u(cx + .05), u(cy + .05)), fill=0)
+    d.ellipse((u(0), u(.3), u(.46), u(.9)), fill=255)                            # grips
+    d.ellipse((u(.54), u(.3), u(1), u(.9)), fill=255)
+    d.rounded_rectangle((u(.12), u(.18), u(.88), u(.66)), radius=u(.2), fill=255)
+    w = round(u(.09))
+    d.line((u(.12), u(.46), u(.36), u(.46)), fill=0, width=w)                    # d-pad
+    d.line((u(.24), u(.34), u(.24), u(.58)), fill=0, width=w)
+    for cx, cy in ((.7, .38), (.8, .52)):                                        # buttons
+        d.ellipse((u(cx - .06), u(cy - .06), u(cx + .06), u(cy + .06)), fill=0)
 
 
 def _battery(d, u) -> None:
-    d.rounded_rectangle((u(.28), u(.18), u(.72), u(.9)), radius=u(.07), fill=255)
-    d.rectangle((u(.4), u(.1), u(.6), u(.18)), fill=255)
+    d.rounded_rectangle((u(.24), u(.12), u(.76), u(.98)), radius=u(.08), fill=255)
+    d.rectangle((u(.38), u(.02), u(.62), u(.12)), fill=255)
 
 
 PICTOGRAMS: Dict[str, Callable] = {MOUSE: _mouse, HEADSET: _headset, KEYBOARD: _keyboard,
@@ -95,28 +99,67 @@ def _font(px: int):
 
 def text_mask(text: str, s: int) -> Image.Image:
     mask = Image.new("L", (s, s), 0)
-    px = int(s * (0.62 if len(text) < 3 else 0.46))
+    px = int(s * (0.7 if len(text) < 3 else 0.52))
     ImageDraw.Draw(mask).text((s / 2, s / 2), text, fill=255, font=_font(px), anchor="mm",
                               stroke_width=max(1, s // 36), stroke_fill=255)
     return mask
 
 
-# --- the icon ---------------------------------------------------------------
+# --- the gauge --------------------------------------------------------------
 
 def frame_width(size: int) -> float:
-    return max(1.6, size * 0.1)
+    return max(2.0, size * 0.13)
 
 
-def _level_mask(silhouette: Image.Image, level) -> Image.Image:
-    """The part of the pictogram below the battery level."""
-    box = silhouette.getbbox()
-    if level is None or box is None:
-        return silhouette
-    top, bottom = box[1], box[3]
-    cut = bottom - (bottom - top) * max(0, min(100, level)) / 100
-    band = Image.new("L", silhouette.size, 0)
-    ImageDraw.Draw(band).rectangle((0, cut, silhouette.width, silhouette.height), fill=255)
-    return ImageChops.multiply(silhouette, band)
+def frame_path(s: float, inset: float, radius: float, steps: int = 24) -> List[Tuple[float, float]]:
+    """Points along the middle of the frame, clockwise from the top centre. The
+    gauge is measured along this path, so each percent is the same length of
+    frame everywhere (a pie slice would run fast on the sides, slow in corners)."""
+    lo, hi = inset, s - inset
+    r = max(0.0, radius - inset)
+    pts = [((lo + hi) / 2, lo)]
+    corners = ((hi - r, lo + r, -90), (hi - r, hi - r, 0), (lo + r, hi - r, 90), (lo + r, lo + r, 180))
+    for cx, cy, start in corners:
+        for i in range(steps + 1):
+            a = math.radians(start + 90 * i / steps)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    pts.append(((lo + hi) / 2, lo))
+    return pts
+
+
+def head(pts: List[Tuple[float, float]], share: float) -> List[Tuple[float, float]]:
+    """The first ``share`` (0..1) of the path, by length."""
+    segments = list(zip(pts, pts[1:], strict=False))
+    lengths = [math.dist(a, b) for a, b in segments]
+    goal = sum(lengths) * max(0.0, min(1.0, share))
+    out = [pts[0]]
+    for (a, b), n in zip(segments, lengths, strict=True):
+        if goal <= n:
+            t = goal / n if n else 0.0
+            out.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+            return out
+        out.append(b)
+        goal -= n
+    return out
+
+
+def gauge_masks(s: int, width: float, radius: float, level) -> Tuple[Image.Image, Image.Image]:
+    """(filled part, empty track) of the frame for a battery level. An unknown
+    level (or the percentage mode, which shows the number) is a full frame."""
+    full = Image.new("L", (s, s), 0)
+    d = ImageDraw.Draw(full)
+    d.rounded_rectangle((0, 0, s - 1, s - 1), radius=radius, fill=255)
+    d.rounded_rectangle((width, width, s - 1 - width, s - 1 - width),
+                        radius=max(0, radius - width), fill=0)
+    if level is None or level >= 100:
+        return full, Image.new("L", (s, s), 0)
+    band = Image.new("L", (s, s), 0)
+    part = head(frame_path(s, width / 2, radius), max(0, level) / 100)
+    if len(part) > 1:
+        # drawn wider than the frame and cut by the frame's shape: clean square ends
+        ImageDraw.Draw(band).line(part, fill=255, width=int(width * 2), joint="curve")
+    filled = ImageChops.multiply(full, band)
+    return filled, ImageChops.subtract(full, filled)
 
 
 def _bolt(s: int) -> Image.Image:
@@ -125,6 +168,8 @@ def _bolt(s: int) -> Image.Image:
     ImageDraw.Draw(m).polygon([(x * s, y * s) for x, y in pts], fill=255)
     return m
 
+
+# --- the icon ---------------------------------------------------------------
 
 @lru_cache(maxsize=256)
 def render(size: int, kind: str, level, border_rgb, *, online: bool = True,
@@ -139,21 +184,15 @@ def render(size: int, kind: str, level, border_rgb, *, online: bool = True,
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
 
     if border_on:
-        ring = Image.new("L", (s, s), 0)
-        d = ImageDraw.Draw(ring)
-        d.rounded_rectangle((0, 0, s - 1, s - 1), radius=radius, fill=255)
-        d.rounded_rectangle((b, b, s - 1 - b, s - 1 - b), radius=max(0, radius - b), fill=0)
-        img.paste(Image.new("RGBA", (s, s), border_rgb + (255,)), (0, 0), ring)
+        filled, track = gauge_masks(s, b, radius, None if show_number else level)
+        img.paste(Image.new("RGBA", (s, s), border_rgb + (255,)), (0, 0), filled)
+        img.paste(Image.new("RGBA", (s, s), border_rgb + (TRACK_ALPHA,)), (0, 0), track)
 
-    pad = int(b + s * 0.045)
+    pad = int(b + s * 0.05)
     inner = s - 2 * pad
-    if show_number:
-        shape = full = text_mask(label(level), inner)
-    else:
-        shape = pictogram(kind, inner)
-        full = _level_mask(shape, level)
+    shape = text_mask(label(level), inner) if show_number else pictogram(kind, inner)
     layer = Image.new("RGBA", (inner, inner), fg + (255,))
-    layer.putalpha(ImageChops.lighter(full, shape.point(lambda v: v * EMPTY_ALPHA // 255)))
+    layer.putalpha(shape)
     img.alpha_composite(layer, (pad, pad))
 
     if charging and size >= 20:
