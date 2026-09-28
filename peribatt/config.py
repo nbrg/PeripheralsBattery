@@ -8,8 +8,9 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from . import APP_NAME
 
@@ -52,6 +53,8 @@ class Store:
         self.settings: Dict[str, Any] = dict(DEFAULTS)
         self.devices: Dict[str, Dict[str, Any]] = {}
         self.logitech_slots: Dict[str, dict] = {}
+        self._save_lock = threading.Lock()
+        self._saved_text: Optional[str] = None
 
     @classmethod
     def load(cls, directory: Path = None) -> "Store":
@@ -64,29 +67,62 @@ class Store:
         except (OSError, ValueError) as e:
             log.warning("settings unreadable, using defaults: %s", e)
             return store
-        for k, v in (raw.get("settings") or {}).items():
-            if k in DEFAULTS and isinstance(v, type(DEFAULTS[k])):
+        if not isinstance(raw, dict):
+            log.warning("settings file has an unexpected shape, using defaults")
+            return store
+        settings = raw.get("settings")
+        for k, v in (settings.items() if isinstance(settings, dict) else ()):
+            default = DEFAULTS.get(k)
+            # bool is an int in Python: don't let `true` become a poll interval
+            if k in DEFAULTS and isinstance(v, type(default)) and \
+                    isinstance(v, bool) == isinstance(default, bool):
                 store.settings[k] = v
-        store.devices = dict(raw.get("devices") or {})
-        store.logitech_slots = dict(raw.get("logitech_slots") or {})
+        for attr in ("devices", "logitech_slots"):
+            value = raw.get(attr)
+            if isinstance(value, dict):
+                setattr(store, attr, {k: v for k, v in value.items() if isinstance(v, dict)})
         return store
 
-    def save(self) -> None:
-        doc = {"settings": self.settings, "devices": self.devices,
-               "logitech_slots": self.logitech_slots}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Write-then-rename so a crash never leaves a half-written file.
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".settings-")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(doc, f, indent=2, sort_keys=True)
-            os.replace(tmp, self.path)
-        except OSError as e:
-            log.warning("could not save settings: %s", e)
+    def _snapshot(self) -> str:
+        """The file's text. Other threads may be updating the dicts while this
+        runs ("dictionary changed size during iteration"): just try again."""
+        for _ in range(5):
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+                doc = {"settings": dict(self.settings), "devices": dict(self.devices),
+                       "logitech_slots": dict(self.logitech_slots)}
+                return json.dumps(doc, indent=2, sort_keys=True)
+            except RuntimeError:
+                continue
+        raise RuntimeError("settings kept changing while saving")
+
+    def save(self) -> None:
+        """Writes the file if anything changed. Safe to call from any thread."""
+        with self._save_lock:
+            try:
+                text = self._snapshot()
+            except RuntimeError as e:
+                log.warning("could not save settings: %s", e)
+                return
+            if text == self._saved_text:
+                return                               # nothing new: no disk write
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                # Write-then-rename so a crash never leaves a half-written file.
+                fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".settings-")
+            except OSError as e:
+                log.warning("could not save settings: %s", e)
+                return
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(text)
+                os.replace(tmp, self.path)
+                self._saved_text = text
+            except OSError as e:
+                log.warning("could not save settings: %s", e)
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     def __getitem__(self, key: str) -> Any:
         return self.settings[key]

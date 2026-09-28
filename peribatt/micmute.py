@@ -25,6 +25,8 @@ PKEY_FriendlyName = ("a45c254e-df1c-4efd-8020-67d146a850e0", 14)
 E_CAPTURE, E_COMMUNICATIONS, DEVICE_STATE_ACTIVE = 1, 2, 1
 CLSCTX_ALL, STGM_READ, VT_LPWSTR = 0x17, 0, 31
 
+FAILURE_BACKOFF = 10.0      # seconds before trying again when there is no microphone
+
 # vtable slots
 ENUM_ENDPOINTS, ENUM_DEFAULT = 3, 4
 COLL_COUNT, COLL_ITEM = 3, 4
@@ -180,19 +182,21 @@ class MicMuteWatcher:
             try:
                 if self._resync or time.monotonic() - last_resolve > 30:     # follow device changes
                     self._resync = False
-                    mic.resolve()
                     last_resolve = time.monotonic()
+                    mic.resolve()
                 if self._toggle.is_set():
                     self._toggle.clear()
                     mic.set_muted(not mic.muted())
                 self.step(mic.muted())
+                wait = self.interval
             except OSError as e:
+                # No microphone (or it just went away): it can't be muted, and asking
+                # Windows again every second would only burn CPU. Look again later.
                 log.debug("mic mute: %s", e)
-                try:
-                    mic.resolve()
-                except OSError:
-                    pass
-            self._toggle.wait(self.interval)
+                self.step(False)
+                last_resolve = time.monotonic() - 30 + FAILURE_BACKOFF
+                wait = FAILURE_BACKOFF
+            self._toggle.wait(wait)
 
     def step(self, muted: bool) -> None:
         if muted != self.state:

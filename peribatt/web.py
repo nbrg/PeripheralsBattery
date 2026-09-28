@@ -187,7 +187,11 @@ class WebUi:
                 self.last_seen = time.monotonic()
                 self.stopped.clear()
                 threading.Thread(target=self.server.serve_forever, name="web", daemon=True).start()
-                threading.Thread(target=self._watchdog, name="web-idle", daemon=True).start()
+                threading.Thread(target=self._watchdog, args=(self.server,), name="web-idle",
+                                 daemon=True).start()
+            # Opening (again) counts as activity: the server must not idle out just as
+            # a new window is about to load.
+            self.last_seen = time.monotonic()
             return self.url
 
     def open(self, page: str = "") -> str:
@@ -204,8 +208,8 @@ class WebUi:
         self.learning.close()
         self.stopped.set()
 
-    def _watchdog(self) -> None:
-        while self.server is not None:
+    def _watchdog(self, server) -> None:
+        while self.server is server:
             time.sleep(min(5.0, self.idle_seconds / 3))
             if time.monotonic() - self.last_seen > self.idle_seconds:
                 log.info("settings window closed; stopping the local server")

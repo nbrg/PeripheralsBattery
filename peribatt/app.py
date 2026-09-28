@@ -27,6 +27,7 @@ SLEEP_GAP = 30.0             # a wait that overran by this much means the PC was
 SLOW_SOURCE = 5.0            # log a warning when one provider takes longer than this
 SEARCHING = "Peripherals Battery: looking for devices…"
 NOTHING_FOUND = "Peripherals Battery: no devices found yet - right-click for Diagnostics"
+ALL_HIDDEN = "Peripherals Battery: all devices are hidden - right-click to show them"
 # Devices from these sources vanish (rather than turn grey) when the source is switched off.
 SOURCE_SWITCHES = {"bt-": "bluetooth", "xinput-": "xinput"}
 
@@ -93,6 +94,8 @@ class App:
         self.source_status: Dict[str, dict] = {}       # provider -> last poll's count/time/error
         self.polled_once = False
         self.open_diagnostics: Optional[Callable[[], None]] = None
+        self.forgotten: set = set()                    # forgotten while off: ignore until seen again
+        self._placeholder_light: Optional[bool] = None
         self._restore_known()
 
     # -- state ------------------------------------------------------------
@@ -123,7 +126,13 @@ class App:
     def apply(self, readings: Sequence[Reading]) -> None:
         """Results of a full poll. Devices that went missing turn grey."""
         with self.lock:
-            fresh = {r.key: r for r in merge(readings)}
+            fresh = {}
+            for r in merge(readings):
+                if r.online:
+                    self.forgotten.discard(r.key)      # it's back: remember it again
+                elif r.key in self.forgotten:
+                    continue                           # sources still report it; the user forgot it
+                fresh[r.key] = r
             for key, old in list(self.readings.items()):
                 if key in fresh:
                     continue
@@ -145,6 +154,10 @@ class App:
     def update(self, r: Reading) -> None:
         """A single pushed change (mute button, power switch)."""
         with self.lock:
+            if r.online:
+                self.forgotten.discard(r.key)
+            elif r.key in self.forgotten:
+                return
             self._update(r)
             self._sync_placeholder()
         self._flush_menus()
@@ -158,7 +171,7 @@ class App:
             self.estimator.record(r, self.clock())
             self.store.devices[r.key] = {"name": r.name, "kind": r.kind, "level": r.level}
         self._draw(r.key)                      # before alerts: a notification needs the icon
-        if r.online:
+        if r.online and self.visible(r.key):     # no nagging about a device the user hid
             self._alerts(self.effective(r))
 
     def set_windows_muted(self, muted: bool) -> None:
@@ -222,21 +235,32 @@ class App:
         """Until a device icon exists, one app icon: the menu (and Exit) must always
         be reachable, and it says whether the first search has finished."""
         visible = [k for k in self.shown if k != PLACEHOLDER]
-        title = NOTHING_FOUND if self.polled_once else SEARCHING
-        if not visible and PLACEHOLDER not in self.shown:
+        if any(not self.visible(k) for k in self.readings):
+            title = ALL_HIDDEN
+        else:
+            title = NOTHING_FOUND if self.polled_once else SEARCHING
+        img = None
+        if not visible and self._placeholder_light != self.light:
             img = render(self.backend.icon_size, DEVICE, None, style.neutral(self.light),
                          light_taskbar=self.light)
+        if not visible and PLACEHOLDER not in self.shown:
             self.backend.show(PLACEHOLDER, img, title)
+            self._placeholder_light = self.light
             self.shown[PLACEHOLDER] = ()
             self.titles[PLACEHOLDER] = title
-        elif not visible and self.titles.get(PLACEHOLDER) != title:
-            self.backend.set_title(PLACEHOLDER, title)
-            self.titles[PLACEHOLDER] = title
-            self._menus_dirty = True
+        elif not visible:
+            if img is not None:                        # taskbar theme changed
+                self.backend.set_image(PLACEHOLDER, img, ())
+                self._placeholder_light = self.light
+            if self.titles.get(PLACEHOLDER) != title:
+                self.backend.set_title(PLACEHOLDER, title)
+                self.titles[PLACEHOLDER] = title
+                self._menus_dirty = True
         elif visible and PLACEHOLDER in self.shown:
             self.backend.remove(PLACEHOLDER)
             self.shown.pop(PLACEHOLDER)
             self.titles.pop(PLACEHOLDER, None)
+            self._placeholder_light = None
 
     def start(self) -> None:
         """Called once before polling starts: show the icon(s) straight away -
@@ -282,6 +306,10 @@ class App:
             self.store[key] = value
             self.store.save()
         self.redraw_all()
+        for s in self.sources:                   # e.g. Bluetooth switched back on: look now
+            invalidate = getattr(s, "invalidate", None)
+            if invalidate:
+                invalidate()
         self.refresh_event.set()
 
     def hide(self, key: str) -> None:
@@ -293,20 +321,37 @@ class App:
     def unhide_all(self) -> None:
         self.set_setting("hidden", [])
 
-    def forget_offline(self) -> None:
-        """Drop grey icons of devices that are gone for good."""
+    def forget(self, key: str) -> bool:
+        """Drop a switched-off device's grey icon and memory. Sources that still
+        remember it are told to let go; it comes back when it is seen online."""
         with self.lock:
-            for key, r in list(self.readings.items()):
-                if not r.online:
-                    self.readings.pop(key)
-                    self.store.devices.pop(key, None)
-                    if key in self.shown:
-                        self.backend.remove(key)
-                        self.shown.pop(key)
-                        self.titles.pop(key, None)
+            r = self.readings.get(key)
+            if r is None or r.online:
+                return False
+            self.readings.pop(key)
+            self.store.devices.pop(key, None)
+            self.forgotten.add(key)
+            for s in self.sources:
+                forget = getattr(s, "forget", None)
+                if forget:
+                    try:
+                        forget(key)
+                    except Exception as e:
+                        log.debug("%s forget: %s", getattr(s, "name", s), e)
+            if key in self.shown:
+                self.backend.remove(key)
+                self.shown.pop(key)
+                self.titles.pop(key, None)
             self._sync_placeholder()
             self.store.save()
         self.backend.refresh_menus()
+        return True
+
+    def forget_offline(self) -> None:
+        """Drop grey icons of devices that are gone for good."""
+        for key, r in list(self.readings.items()):
+            if not r.online:
+                self.forget(key)
 
     # -- loops ------------------------------------------------------------
     def poll_once(self) -> List[Reading]:

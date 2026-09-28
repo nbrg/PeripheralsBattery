@@ -64,6 +64,18 @@ def guess_kind(name: str) -> str:
 Record = Tuple[str, str, int, bool]
 
 
+GENERIC_NAME = re.compile(r"bluetooth|generic|gatt|attribute|service|hands-?free|avrcp|"
+                          r"hid device|hid-compliant|le device|audio gateway|^(hid|le|bt)$", re.I)
+
+
+def _rank(rec: Record) -> tuple:
+    """Which of a device's nodes names it best: connected first, then a real name
+    ("Keychron K8 Pro") over a generic one ("Bluetooth LE Generic Attribute Service"),
+    then the shorter one."""
+    _, name, _, started = rec
+    return (started, not GENERIC_NAME.search(clean_name(name)), -len(name))
+
+
 def to_readings(records: Iterable[Record]) -> List[Reading]:
     best: Dict[str, Record] = {}
     for rec in records:
@@ -71,7 +83,7 @@ def to_readings(records: Iterable[Record]) -> List[Reading]:
         if not 0 <= level <= 100:
             continue
         cur = best.get(cid)
-        if cur is None or (started, len(name) < len(cur[1])) > (cur[3], False):
+        if cur is None or _rank(rec) > _rank(cur):
             best[cid] = rec
     out = []
     for cid, (_, name, level, started) in best.items():

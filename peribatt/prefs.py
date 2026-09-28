@@ -156,18 +156,10 @@ def set_hidden(app, key: str, hidden: bool) -> None:
 
 def forget(app, key: str) -> Optional[str]:
     """Drop one device's memory (its icon returns if it is seen again)."""
-    with app.lock:
-        r = app.readings.get(key)
-        if r is None:
-            return None
-        if r.online:
-            return "Only disconnected devices can be forgotten."
-        app.readings.pop(key)
-        app.store.devices.pop(key, None)
-        if key in app.shown:
-            app.backend.remove(key)
-            app.shown.pop(key)
-            app.titles.pop(key, None)
-        app._sync_placeholder()
-        app.store.save()
+    r = app.readings.get(key)
+    if r is None:
+        return None
+    if r.online:
+        return "Only disconnected devices can be forgotten."
+    app.forget(key)
     return None

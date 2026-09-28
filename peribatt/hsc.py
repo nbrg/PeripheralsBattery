@@ -11,7 +11,7 @@ import logging
 import shutil
 import subprocess
 import sys
-from typing import Callable, Iterable, List, Optional, Set, Tuple
+from typing import Callable, Iterable, List, Optional, Set, Tuple, Union
 
 from .model import HEADSET, Reading
 
@@ -54,11 +54,23 @@ def parse(output: str, skip: Iterable[Tuple[int, int]] = ()) -> List[Reading]:
 class HeadsetControlSource:
     name = "headsetcontrol"
 
-    def __init__(self, exe: str = "", skip: Set[Tuple[int, int]] = frozenset(),
+    def __init__(self, exe: Union[str, Callable[[], str]] = "",
+                 skip: Set[Tuple[int, int]] = frozenset(),
                  run: Optional[Callable[[List[str]], str]] = None):
-        self.exe = exe or shutil.which("headsetcontrol") or ""
+        # A callable is read on every poll, so changing the path in the settings
+        # works without restarting the app.
+        self._exe = exe
         self.skip = set(skip)
         self._run = run or self._subprocess
+
+    @property
+    def exe(self) -> str:
+        configured = self._exe() if callable(self._exe) else self._exe
+        return (configured or "").strip().strip('"') or shutil.which("headsetcontrol") or ""
+
+    @exe.setter
+    def exe(self, value: str) -> None:
+        self._exe = value
 
     @property
     def available(self) -> bool:

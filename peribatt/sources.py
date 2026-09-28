@@ -53,6 +53,10 @@ class Throttled:
             self._at = now
         return list(self._last)
 
+    def invalidate(self) -> None:
+        """A setting changed: ask the source again on the next poll."""
+        self._at = None
+
     def reset(self) -> None:
         """Forget the cached result so the next poll asks again (after sleep)."""
         self._at = None
@@ -72,7 +76,7 @@ def build_sources(store: Store, on_change: Optional[Callable[[Reading], None]] =
         recipes,
         Throttled(Switchable(BluetoothSource(), lambda: store["bluetooth"]), 120),
         Switchable(XInputSource(), lambda: store["xinput"]),
-        Throttled(HeadsetControlSource(store["headsetcontrol"], skip), 300),
+        Throttled(HeadsetControlSource(lambda: store["headsetcontrol"], skip), 300),
     ]
 
 

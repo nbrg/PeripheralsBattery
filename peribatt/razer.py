@@ -147,6 +147,10 @@ class RazerSource:
                 self.working[pid] = (i, tid)
                 saw_asleep = True
                 break
+        if not saw_asleep and pid in self.working:
+            # The route that used to work did not (replugged dongle, new firmware...):
+            # probe all collections and transaction ids again next time.
+            self.working.pop(pid, None)
         if saw_asleep or pid in self.last:
             prev = self.last.get(pid)
             return Reading(key, name, prev.kind if prev else guess_kind(name),
@@ -154,3 +158,9 @@ class RazerSource:
         if pid not in self.working:
             self.unsupported.add(pid)
         return None
+
+    def forget(self, key: str) -> None:
+        for pid in list(self.last):
+            if f"razer-{pid:04x}" == key:
+                self.last.pop(pid, None)
+                self.working.pop(pid, None)

@@ -164,8 +164,7 @@ class PystrayBackend:
                 Item("Open data folder", lambda: _open_folder()),
             ]
             if sys.platform == "win32":
-                out.append(Item("Start with Windows",
-                                lambda: winshell.set_autostart(not winshell.autostart_enabled()),
+                out.append(Item("Start with Windows", lambda: _toggle_autostart(),
                                 checked=lambda _i: winshell.autostart_enabled()))
             out += [Menu.SEPARATOR,
                     Item(f"{DISPLAY_NAME} {__version__}", None, enabled=False),
@@ -173,6 +172,13 @@ class PystrayBackend:
             return out
 
         return Menu(items)
+
+
+def _toggle_autostart():
+    try:
+        winshell.set_autostart(not winshell.autostart_enabled())
+    except OSError:
+        log.exception("could not change Start with Windows")
 
 
 def _open_folder():

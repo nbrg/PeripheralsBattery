@@ -44,6 +44,7 @@ LONG_LEN = 20
 SW_ID = 0x0B
 WIRED = 0xFF
 RECEIVER_SLOTS = range(1, 7)
+SILENT_BACKOFF = 600.0      # a slot that never answered is skipped for 10 minutes
 
 ERR_V1, ERR_V2 = 0x8F, 0xFF
 ERR_UNKNOWN_DEVICE = 0x08
@@ -243,6 +244,7 @@ class LogitechSource:
         # slot id -> {"key", "name", "kind"}; persisted so a mouse that is off at
         # start-up still gets its (grey) icon.
         self.known: Dict[str, dict] = known if known is not None else {}
+        self.silent: Dict[str, float] = {}       # slot id -> skip until (monotonic time)
         self.log: List[str] = []
 
     @staticmethod
@@ -286,6 +288,10 @@ class LogitechSource:
             return None
         except TimeoutError as e:
             self.log.append(f"{sid}: {e}")
+            if sid not in self.known:
+                # Some receivers never answer for unused slots: stop paying a
+                # one-second timeout for each of them on every poll.
+                self.silent[sid] = self.clock() + SILENT_BACKOFF
             return None
         level, charging = decode_battery(prof.feature, p)
         self.log.append(f"{sid} {prof.name}: {hexdump(p, 4)} -> {level}% charging={charging}")
@@ -303,6 +309,8 @@ class LogitechSource:
                 continue
             try:
                 for index in (RECEIVER_SLOTS if pid in RECEIVERS else (WIRED,)):
+                    if self.silent.get(self.slot_id(pid, index), 0) > self.clock():
+                        continue
                     r = self._read(ch, pid, index)
                     if r:
                         out.append(r)
@@ -311,10 +319,16 @@ class LogitechSource:
             finally:
                 ch.close()
         online = {r.key for r in out}
-        for sid, info in self.known.items():
+        for sid, info in list(self.known.items()):
             if info["key"] not in online:
                 pid = int(sid.split(":")[0], 16)
                 note = "switched off" if pid in groups else "not connected"
                 out.append(Reading(info["key"], info["name"], info.get("kind", DEVICE),
                                    None, False, online=False, note=note))
         return out
+
+    def forget(self, key: str) -> None:
+        for sid, info in list(self.known.items()):
+            if info.get("key") == key:
+                self.known.pop(sid, None)
+                self.profiles.pop(sid, None)

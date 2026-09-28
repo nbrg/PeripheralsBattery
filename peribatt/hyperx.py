@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .hidio import HidApi, hexdump
@@ -138,7 +139,7 @@ class HyperXSource:
         self._handles: List[object] = []
         self._writer = None
         self._stop = threading.Event()
-        self.log: List[str] = []
+        self.log: deque = deque(maxlen=50)      # diagnostics; bounded, it is never cleared
 
     # -- device handling -------------------------------------------------
     def _open(self) -> bool:
