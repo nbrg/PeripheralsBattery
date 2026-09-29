@@ -33,10 +33,11 @@ def test_decode_known_replies():
     assert decode(reply(CMD_CHARGE, b4=0)) == {"charging": False}
     assert decode(reply(0x08, b4=1)) == {"muted": True}
     assert decode(reply(0x08, b4=0)) == {"muted": False}
-    assert decode(reply(CMD_STATUS, b4=1)) == {"online": True, "on_cable": False}
-    assert decode(reply(CMD_STATUS, b4=4)) == {"online": True, "on_cable": False}
-    assert decode(reply(CMD_STATUS, b4=3)) == {"online": True, "on_cable": True}
-    # other status values are not "off" on every dongle (the Flight S flickered)
+    assert decode(reply(CMD_STATUS, b4=1)) == {"online": True}
+    assert decode(reply(CMD_STATUS, b4=4)) == {"online": True}
+    # other status values are not "off" on every dongle (the Flight S flickered),
+    # and 03 is not "on" either: it came for hours from a headset switched off
+    assert decode(reply(CMD_STATUS, b4=3)) == {}
     assert decode(reply(CMD_STATUS, b4=2)) == {}
     assert decode(reply(CMD_STATUS, b4=0)) == {}
 
@@ -248,27 +249,19 @@ def test_collections_that_reject_requests_are_dropped():
 
 # --- a Cloud Flight S on its USB cable (diagnostics from a real one) ------------------
 
-def test_status_03_means_on_the_cable_and_charging():
-    """On battery the headset answered 'bb 01 01'; plugged in, 'bb 01 03' - and it
-    stopped answering the battery request."""
+def test_status_03_from_a_switched_off_headset_is_not_charging():
+    """Diagnostics from a Cloud Flight S switched off for hours: the dongle kept
+    answering 'bb 01 03', the headset nothing, and there was no 0951:16EB device.
+    v0.6.9 read 03 as 'on its cable' and showed it charging."""
     api, _ = dongle()
     src = HyperXSource(api=api, threaded=False)
     src.poll()
     src.feed(reply(CMD_BATTERY, b7=39))
-    src.feed(reply(CMD_STATUS, 1))
-    assert not src.readings()[0].charging
-    src.feed(reply(CMD_STATUS, 3))
-    r = src.readings()[0]
-    assert r.online and r.charging and r.level == 39
-    for _ in range(MISSED_POLLS_OFFLINE + 1):           # no battery answers while charging...
+    for _ in range(MISSED_POLLS_OFFLINE + 1):
         src.poll()
-        src.feed(reply(CMD_STATUS, 3))                  # ...but it keeps answering the status
+        src.feed(reply(CMD_STATUS, 3))
     r = src.readings()[0]
-    assert r.online and r.charging and r.level is None  # alive, charging, no stale level
-    src.feed(reply(CMD_STATUS, 1))                      # unplugged
-    src.feed(reply(CMD_BATTERY, b7=52))
-    r = src.readings()[0]
-    assert not r.charging and r.level == 52
+    assert not r.online and not r.charging and r.note == "switched off"
 
 
 def test_the_headsets_own_usb_device_means_charging():
@@ -280,6 +273,19 @@ def test_the_headsets_own_usb_device_means_charging():
     api.add(0x0951, 0x16EB, b"cable", QueueHandle(), usage_page=0xFF00, usage=1)
     [r] = src.poll()
     assert r.charging
+
+
+def test_on_its_cable_with_the_radio_off_it_is_still_charging():
+    """On the cable the Flight S may turn its radio off: the dongle then gets no
+    answers, but the headset's own USB device says it is plugged in."""
+    api, _ = dongle()
+    api.add(0x0951, 0x16EB, b"cable", QueueHandle(), usage_page=0xFF00, usage=1)
+    src = HyperXSource(api=api, threaded=False)
+    src.feed(reply(CMD_BATTERY, b7=60))
+    for _ in range(MISSED_POLLS_OFFLINE + 2):
+        [r] = src.poll()
+    assert r.online and r.charging and r.level is None     # no stale level
+    assert r.note == ""
 
 
 def test_undecoded_replies_still_count_as_answers():

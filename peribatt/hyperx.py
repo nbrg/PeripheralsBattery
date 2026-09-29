@@ -58,7 +58,6 @@ AUTO_OFF_CHOICES = (10, 20, 30)          # minutes, as NGENUITY offers them
 ANSWER_WAIT = 1.5                        # seconds to wait for the headset to answer a setting
 ANSWER_TIMEOUT = 1.0                     # per queued request, before the next one is sent
 REPLY_ID, MAGIC = 0x0B, 0xBB
-STATUS_ON_CABLE = 0x03
 # A Cloud Flight S on its USB cable shows up as a device of its own (0951:16EB,
 # collections ff00/ff42) next to its dongle (0951:16EA): the cable is in.
 HEADSET_ON_USB = {0x16EA: 0x16EB}
@@ -100,11 +99,11 @@ def decode(report: Sequence[int]) -> Dict[str, object]:
         # everywhere: the Cloud Flight S answers the 3-second status query with
         # other values while it is on, which made the icon flip between on and
         # off. So only "connected" is taken from it (as CubE135's Flight S monitor
-        # does); "off" comes from battery requests going unanswered.
+        # does); "off" comes from battery requests going unanswered. 03 is the
+        # dongle answering for a headset that is off or not linked (it kept coming
+        # for hours with the headset switched off): not "on", and not "charging".
         if value in (1, 4):
-            return {"online": True, "on_cable": False}
-        if value == STATUS_ON_CABLE:
-            return {"online": True, "on_cable": True}
+            return {"online": True}
         return {}
     if cmd == CMD_BATTERY:
         return {"online": True, "level": r[7]} if r[7] <= 100 else {}
@@ -126,7 +125,6 @@ class HeadsetState:
         self.online = False           # headset switched on and linked
         self.level: Optional[int] = None
         self.charging = False         # from a charging reply (dongles that answer one)
-        self.on_cable = False         # status 03: the headset says its cable is in
         self.usb = False              # the headset's own USB device is present
         self.muted = False
         self.missed = 0               # polls without any battery answer (level too old to show)
@@ -153,8 +151,6 @@ class HeadsetState:
             self.missed = 0
         if "charging" in changes:
             self.charging = bool(changes["charging"])
-        if "on_cable" in changes:
-            self.on_cable = bool(changes["on_cable"])
         if "muted" in changes:
             self.muted = bool(changes["muted"])
         if "auto_off" in changes:
@@ -164,15 +160,18 @@ class HeadsetState:
         return self.reading() != before
 
     def reading(self) -> Reading:
-        online = self.present and self.online
+        # The headset's own USB device is there only while its cable is in: that
+        # is charging, and it is on the cable even with its radio off.
+        usb = self.present and self.usb
+        online = self.present and (self.online or usb)
         note = "" if online else ("switched off" if self.present else "dongle unplugged")
-        charging = online and (self.charging or self.on_cable or self.usb)
+        charging = usb or (online and self.charging)
         # Only a level the headset still reports: on its cable a Cloud Flight S stops
         # answering the battery request, and its last answer is not today's level.
         fresh = self.missed <= MISSED_POLLS_OFFLINE
         level = self.level if (fresh or not online) else None
         return Reading(self.key, self.name, HEADSET, level, charging,
-                       online=online, muted=self.muted and online, note=note)
+                       online=online, muted=self.muted and online and self.online, note=note)
 
 
 class HyperXSource:
